@@ -1,12 +1,11 @@
-# hadron_tagging — modern key4hep stack port
+# hadron_tagging — modern key4hep stack port (full feature set)
 
-This is the modern-stack port of `hadron_tagging` from
+Modern-stack port of `hadron_tagging` from
 [zuoxunwu/FCCAnalyses@hadronTagger_dev](https://github.com/zuoxunwu/FCCAnalyses/tree/hadronTagger_dev/examples/FCCee/flavour/hadron_tagging).
-The original was on the centos7 / EDM4hep 0.7 stack and targeted the centrally
-produced FCC IDEA winter2023 samples; this version runs on the modern key4hep
-stack (FCCAnalyses 0.12.x, EDM4hep 1.0) and uses DELPHI EDM4hep produced by
-`delphi-improved-reco`'s `delphi_to_edm4hep` converter (branch
-`feature/edm4hep-pipeline`).
+The original was on the centos7 / EDM4hep 0.7 stack; this branch runs on
+the modern key4hep stack (FCCAnalyses 0.12.x, EDM4hep 1.0) and uses DELPHI
+EDM4hep produced by `delphi-improved-reco`'s `delphi_to_edm4hep` converter
+(branch `feature/edm4hep-pipeline`).
 
 ## Running
 
@@ -15,57 +14,76 @@ source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
 fccanalysis run examples/FCCee/flavour/hadron_tagging/analysis_stage1.py
 ```
 
-The default `inputDir` points at our local DELPHI Z→bb output:
-
-```
-/eos/user/s/sqian/www/delphi_edm4hep/phaseA-fcc/zbb/events_phA_bb_fcc.root
-```
+The default `inputDir` points at our local DELPHI Z→bb output. `processList`
+sets the file basename without `.edm4hep.root` extension; a symlink
+`events_phA_bb_fcc.root → events_phA_bb_fcc.edm4hep.root` is required since
+`fccanalysis` appends `.root`.
 
 ## What this does
 
-A reduced-feature smoke test that verifies the modern FCCAnalyses toolchain
-runs end-to-end on DELPHI EDM4hep. It:
+Full-feature stage1 ntuple, restored from the legacy version. Event
+selection is `EVT_hasPV==1` (~96% pass on Z→bb).
 
-- counts gen B-hadron and Λb species (Bs, Bu, Bd, Bc, Λb)
-- assigns per-thrust-hemisphere truth labels (label_Bs_Emin, label_Bu_Emin, …)
-- computes basic reco kinematics (RP_e, RP_px, RP_py, RP_pz, RP_charge, …)
-- computes thrust + hemisphere energy/multiplicity splits
-- computes the legacy reco PV — MC PV offset (PV_x_offset, PV_y_offset, PV_z_offset)
+- **Gen-level B-hadron / Λ_b counts + thrust hemisphere assignment**
+  (`n_genBs/Bu/Bd/Bc/Lb`, `genB?_thrustangle`, `label_B?_Emin/Emax`).
+- **Reco P kinematics + helix params at IP** (`RP_e`, `RP_p{x,y,z}`,
+  `RP_charge`, `RP_trk_d0/z0/phi/omega/tanLambda`).
+- **TPC dE/dx per RP** (`RP_dndx`) — pulled from the modern
+  `EFlowTrack_dNdx` (RecDqdx) collection via the explicit
+  `_EFlowTrack_dNdx_track` index relation.
+- **Reco→MC truth match** (`RP_MCidx`, `RP_nMC`, `RP_fromBs/Bu/Bd/Bc/Lb`)
+  via the `MCRecoAssociations` collection produced by `delphi_to_edm4hep`'s
+  helix matcher (greedy nearest-neighbour in (theta, phi, p), ~85% MC-side
+  match rate on Z→bb).
+- **Reco vertex object** (`Vertex_*`) built by `myUtils::get_VertexObject`
+  using the MC vertex tree + RP-MC assoc + tracks.
+  - Modern EDM4hep 1.0 stores per-track AtIP states in
+    `_EFlowTrack_trackStates` (one per track in our converter), passed
+    directly as the TrackState input — replaces the legacy `EFlowTrack_1`
+    flat-table convention.
+- **Thrust + hemisphere energy / multiplicity splits**
+  (`EVT_thrust*`, `EVT_ThrustEmin/Emax_*`).
+- **PV — reco vs. MC offset** (`PV_x/y/z`, `PV_x/y/z_offset`).
 
-Verified Z→bb vs Z→light separation at gen level (0 vs 2 B's/evt).
+## Cross-check (Z→bb vs. Z→light, 100 events each)
 
-## Differences from the original (legacy) version
-
-| feature | original | modern smoke test |
+| | Z→bb | Z→light |
 | --- | --- | --- |
-| stack | spackages6 / centos7 / EDM4hep 0.7 | key4hep / el9 / EDM4hep 1.0 |
-| input sample | FCC IDEA winter2023 SimDelphes | DELPHI shortDST → EDM4hep |
-| BDT inference | TMVA RBDT (xzuo's afs path) | dropped |
-| MCRecoAssociations features | yes | dropped (collection not in our converter output) |
-| EFlowTrack_1/2 (track state, dNdx) | yes | dropped (modern schema; would need re-aliasing) |
-| Vertex_* (recovered SVs, mass, d2PV, …) | yes | dropped (depends on get_VertexObject) |
-| RP_trk_d0/z0/phi/omega/tanLambda | yes | dropped |
-| RP_dndx / RP_mtof | yes | dropped (no calorimeter timing in DELPHI) |
-| gen B counts + thrust labels | yes | yes |
-| reco P4 + thrust hemispheres | yes | yes |
+| events passing PV filter | 100/104 | 100/104 |
+| total reco PFOs | 2987 | 2696 |
+| RPs tagged from-Bs / Bd / Bu / Λb | 81 / 442 / 324 / 33 | 0 / 5 / 3 / 0 |
+| dE/dx population (>0) | 78% | 79% |
+| dE/dx mean | 1.85 | 1.90 |
 
-## To restore full feature set
+The flavor labels cleanly separate Z→bb (heavy-flavor) from Z→light
+(prompt-only). RP-level d0 distribution centered at 0 with hadronic-decay
+tail.
 
-The dropped features are recoverable but each depends on adding the missing
-collection / association to the converter:
+## Modern-stack quirks
 
-1. **MCRecoAssociations**: add to `delphi_to_edm4hep` a per-RP truth match
-   built from the `_ReconstructedParticles_tracks` ↔ `_Particle` map. Many
-   DELPHI samples link via the dominant TPC track of each RP back to a single
-   MCParticle; PV and SV consumers need this.
-2. **EFlowTrack_1/2 aliases**: in modern EDM4hep 1.0 the track state lives in
-   `_EFlowTrack_trackStates` and dE/dx in `EFlowTrack_dNdx` (RecDqdx).
-   The legacy FCC analyses' `EFlowTrack_1` / `EFlowTrack_2` aliases would
-   need to be replaced with calls into modern `ReconstructedTrack::*` helpers.
-3. **functions.h**: trimmed for this smoke test. The original had helpers
-   keyed off EDM4hep 0.x field names (`vertex.primary`,
-   `TrackData.dxQuantities_begin`, `TrackerHitData`, `RP::type`); restore
-   piecewise as needed.
-4. **BDT inference**: load the trained model from a robust location (not afs)
-   and re-add the `computeModel1` line. This is decoupled from the schema
-   migration above.
+Several FCCAnalyses helpers depend on EDM4hep 0.x field names that were
+renamed / replaced in 1.0. The local `functions.h` works around the gap:
+
+- `vertex.primary` → bit-encoded in `vertex.type`. The modern
+  `VertexFitter` writes `type = Primary` literally instead of using the
+  bit, so `myUtils::get_Vertex_isPV` and `myUtils::hasPV` always return
+  false. Local replacements `get_Vertex_isPV` / `hasPV` use
+  `FCCAnalysesVertex.mc_ind == 0` instead.
+- `TrackData.dxQuantities_begin` (legacy dE/dx index) → modern
+  `RecDqdxCollection` is its own collection with explicit
+  `_EFlowTrack_dNdx_track.index` relation. Local `get_RP_dndx` walks
+  this relation.
+- `TrackerHitData` → `TrackerHit3DData` (renamed).
+- `RP::type` → gone.
+
+## Reduced features (vs. original) — still dropped
+
+- **TMVA RBDT inference** (xzuo's afs path). Re-add when the model
+  is available from a stable location.
+- **`RP_mtof`** — DELPHI shortDST has no calorimeter timing.
+
+## Reference
+
+- Modern path output: `/eos/user/s/sqian/www/delphi_edm4hep/phaseA-fcc/`
+  - web: https://sqian.web.cern.ch/sqian/delphi_edm4hep/phaseA-fcc/
+- Legacy path (centos7 stack, no MCParticles): `/eos/user/s/sqian/www/delphi_edm4hep/phaseA-legacy/`
