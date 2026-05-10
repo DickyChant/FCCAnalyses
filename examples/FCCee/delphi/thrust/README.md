@@ -44,8 +44,9 @@ singularity exec --bind /cvmfs:/cvmfs:ro --bind /lib64:/host_lib64:ro \
         --output /tmp/zbb/legacy_nanoaod.root \
         --max-events 100 --mc"
 
-# 3. EDM4hep
-delphi-improved-reco/bin/delphi_to_edm4hep --fcc-names \
+# 3. EDM4hep — `--require-lvlock-zero` keeps only the SKELANA-selected
+#    tracks (legacy applies the same cut via IFLSTR/IFLCUT in the YAML).
+delphi-improved-reco/bin/delphi_to_edm4hep --fcc-names --require-lvlock-zero \
     /tmp/zbb/raw_mc_sdst.root  /tmp/zbb/zbb.edm4hep.root
 
 # 4. Both analyzers
@@ -64,13 +65,21 @@ python compare.py /tmp/zbb/legacy.csv /tmp/zbb/edm4hep.csv
   bit-identical (d=0):  66/100
   |Δ| < 1e-06:          100/100
   mean / median / max:  3.20e-08  0.00e+00  1.69e-07
+
+=== Reco thrust ===
+  bit-identical (d=0):  100/100
+  mean / median / max:  0.000e+00  0.000e+00  0.000e+00
 ```
 
-100/100 events agree at **<1e-7** — the algorithm port is float-precision
-identical. The 34 events with non-zero (but <1e-7) delta differ only in
-numpy float-summation order, since the brute-force thrust kernel evaluates
-`O(n²)` cross products in slightly different sequences when the underlying
-arrays come from two different writers.
+Reco-thrust is **bit-identical** event-for-event when the converter is
+run with `--require-lvlock-zero`. Gen-thrust agrees to <1e-7 on all 100
+events; the 34 non-zero (sub-1e-7) entries differ only in numpy
+float-summation order — the brute-force thrust kernel evaluates `O(n²)`
+cross products in slightly different sequences when the input arrays
+come from two different writers.
+
+Verified on two independent generations (same kernel, two separate
+Pythia → DELSIM passes): both 100/100 with max Δ = 0.000e+00.
 
 ### One subtlety: long-lived neutrals
 
@@ -89,27 +98,23 @@ identical inputs — that's the prerequisite for the float-precision claim.
 The other gen oddity: legacy keeps ~2 entries with `pid==0` (JETSET
 string remnants); PSHLUJ skips them too. Both analyzers drop those.
 
-### Reco thrust — *not* float-precision matched (selection difference)
+### Reco-thrust parity: how the input selection is matched
 
-```
-=== Reco thrust ===
-  mean / median / max:  1.71e-02  1.12e-02  7.18e-02
-```
+The legacy nanoaod applies SKELANA's track-quality cut (`LVLOCK==0`,
+controlled by `IFLSTR`/`IFLCUT` in the config YAML). To reproduce the
+same selection downstream:
 
-The legacy nanoaod applies SKELANA's track-quality cut (LVLOCK==0,
-controlled by IFLSTR/IFLCUT in the config YAML), so its `t.nParticle`
-charged track count is a **subset** of `delphi_to_edm4hep`'s
-`ReconstructedParticles`. The 4-momenta of the surviving tracks match
-bit-for-bit between the two writers (the perigee is the same PA.TRAC
-record), but the analyzers see different numbers of input tracks
-(typically 24 vs 31), so the thrust value differs.
+1. The raw nanoaod surfaces `TracRaw_lvlock` — SKELANA's per-track
+   quality word, mapped from PA tracks via the PUCLLL `LVECP` link
+   (ordinal mapping is unstable when PSHCTRECOVER reclassifies tracks).
+2. The converter accepts `--require-lvlock-zero`, which drops every
+   TracRaw row whose `LVLOCK != 0` — the same cut legacy applies.
+3. Both writers' surviving tracks then carry bit-identical 4-momenta
+   (`TracRaw_vecpPx`/`Py`/`Pz`/`E` from SKELANA's stored VECP entries),
+   and the thrust kernel evaluates the same input array.
 
-This is an *input-selection* difference, not an algorithm bug. To get
-reco-level float parity you'd either:
-1. Apply LVLOCK==0 inside `delphi_to_edm4hep`, or
-2. Match the surviving 24 EDM4hep tracks to the 24 legacy ones by
-   4-momentum and run the kernel on that subset.
-
-Out of scope here — the whole point of writing every TracRaw_* into
-EDM4hep is to let downstream analyses (FCCAnalyses / weaver / ParT) make
-their own selection from a richer pool.
+If you instead want every reconstructed track in EDM4hep (so
+FCCAnalyses / weaver / ParT can make their own selection from a richer
+pool), drop `--require-lvlock-zero`. The reco-thrust comparison then
+shows a non-zero per-event delta — that's the input-selection
+difference, not an algorithm bug.
