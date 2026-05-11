@@ -204,6 +204,42 @@ inline ROOT::VecOps::RVec<int> get_Vertex_containDescendant(
   return result;
 }
 
+// Per-PFO PID flag from a `_ParticleID_*_particle` index relation.
+// Resolves the index against the ORIGINAL ReconstructedParticles ordering
+// (the column the relation was written against), then re-emits the flag
+// in the order of `rpAtVertex` (a permutation of the same particles).
+//
+// We rely on stable per-RP identity: every RP in rpAtVertex appears
+// exactly once in rp, and we match by the byte-identical
+// ReconstructedParticleData payload (cheap: track_begin is unique per RP
+// in our converter).
+inline ROOT::VecOps::RVec<int>
+hasPIDLink_onRP(Vec_rp rp,
+                Vec_rp rpAtVertex,
+                ROOT::VecOps::RVec<podio::ObjectID> pid_to_part) {
+  std::vector<bool> hasPID(rp.size(), false);
+  for (auto &oid : pid_to_part) {
+    if (oid.index >= 0 && static_cast<size_t>(oid.index) < rp.size())
+      hasPID[oid.index] = true;
+  }
+  ROOT::VecOps::RVec<int> result;
+  result.reserve(rpAtVertex.size());
+  for (auto &p : rpAtVertex) {
+    bool flag = false;
+    for (size_t j = 0; j < rp.size(); ++j) {
+      if (rp[j].tracks_begin == p.tracks_begin &&
+          rp[j].tracks_end   == p.tracks_end   &&
+          rp[j].charge       == p.charge       &&
+          rp[j].energy       == p.energy) {
+        flag = hasPID[j];
+        break;
+      }
+    }
+    result.push_back(flag ? 1 : 0);
+  }
+  return result;
+}
+
 // Per-RP dE/dx pulled from the modern EDM4hep RecDqdxCollection schema.
 // dNdx is parallel to `_EFlowTrack_dNdx_track.index`, which gives the index
 // into the EFlowTrack collection that this RecDqdx entry refers to. We index
