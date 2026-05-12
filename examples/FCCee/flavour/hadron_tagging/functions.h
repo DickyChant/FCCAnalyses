@@ -240,6 +240,32 @@ hasPIDLink_onRP(Vec_rp rp,
   return result;
 }
 
+// Permute a per-PFO int32 UserData column (e.g., Track_lvlock) from the
+// original ReconstructedParticles ordering into the RecoPartPIDAtVertex
+// ordering used elsewhere in the analysis. Returns one entry per
+// rpAtVertex element. Falls back to -1 if no matching original RP found.
+inline ROOT::VecOps::RVec<int>
+permuteIntOnRP(Vec_rp rp,
+               Vec_rp rpAtVertex,
+               ROOT::VecOps::RVec<int> flat) {
+  ROOT::VecOps::RVec<int> result;
+  result.reserve(rpAtVertex.size());
+  for (auto &p : rpAtVertex) {
+    int value = -1;
+    for (size_t j = 0; j < rp.size() && j < flat.size(); ++j) {
+      if (rp[j].tracks_begin == p.tracks_begin &&
+          rp[j].tracks_end   == p.tracks_end   &&
+          rp[j].charge       == p.charge       &&
+          rp[j].energy       == p.energy) {
+        value = flat[j];
+        break;
+      }
+    }
+    result.push_back(value);
+  }
+  return result;
+}
+
 // Per-RP dE/dx pulled from the modern EDM4hep RecDqdxCollection schema.
 // dNdx is parallel to `_EFlowTrack_dNdx_track.index`, which gives the index
 // into the EFlowTrack collection that this RecDqdx entry refers to. We index

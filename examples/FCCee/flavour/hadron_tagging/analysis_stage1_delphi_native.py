@@ -236,6 +236,15 @@ class RDFanalysis():
             .Define('RP_isEl',     'FCCAnalyses::ZHfunctions::hasPIDLink_onRP(ReconstructedParticles, RecoPartPIDAtVertex, _ParticleID_Electron_particle)')
             .Define('RP_hasRich',  'FCCAnalyses::ZHfunctions::hasPIDLink_onRP(ReconstructedParticles, RecoPartPIDAtVertex, _ParticleID_HadronRich_particle)')
 
+            ## SKELANA LVLOCK quality word per PFO. Same ordering as
+            ## ReconstructedParticles (= PandoraPFOs in the input). The
+            ## helper permutes it into RecoPartPIDAtVertex order so this
+            ## column is parallel to RP_e/RP_px/etc.
+            ##   -1 = input lacks the field (e.g. pre-LVLOCK nanoaod)
+            ##    0 = passes legacy IFLSTR=11/IFLCUT=3 selection
+            ##   >0 = locked. Apply `RP_lvlock == 0` for the standard cut.
+            .Define('RP_lvlock',   'FCCAnalyses::ZHfunctions::permuteIntOnRP(ReconstructedParticles, RecoPartPIDAtVertex, Track_lvlock)')
+
             .Define('RP_nMC',     'FCCAnalyses::ZHfunctions::getRP2MC_nMC(MCRecoAssociations0, MCRecoAssociations1, RecoPartPIDAtVertex)')
             .Define('RP_MCidx',   'ReconstructedParticle2MC::getRP2MC_index(MCRecoAssociations0, MCRecoAssociations1, RecoPartPIDAtVertex)')
             .Define('RP_fromBs',  'FCCAnalyses::ZHfunctions::get_RP_isDescendant(531,  true)(RP_MCidx, Particle, Particle1)')
@@ -346,7 +355,7 @@ class RDFanalysis():
             'RP_px', 'RP_py', 'RP_pz', 'RP_phi', 'RP_theta', 'RP_charge',
             'RP_thrustangle', 'RP_fromPV', 'RP_vert_ind',
             'RP_trk_d0', 'RP_trk_z0', 'RP_trk_phi', 'RP_trk_omega', 'RP_trk_tanLambda',
-            'RP_dndx', 'RP_isMu', 'RP_isEl', 'RP_hasRich',
+            'RP_dndx', 'RP_isMu', 'RP_isEl', 'RP_hasRich', 'RP_lvlock',
             'RP_nMC', 'RP_MCidx',
             'RP_fromBs', 'RP_fromBu', 'RP_fromBd', 'RP_fromBc', 'RP_fromLb',
 
