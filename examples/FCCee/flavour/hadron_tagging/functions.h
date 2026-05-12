@@ -240,6 +240,88 @@ hasPIDLink_onRP(Vec_rp rp,
   return result;
 }
 
+// Filter a ReconstructedParticles collection by SKELANA's per-track
+// LVLOCK quality word (`Track_lvlock` UserData column, parallel to the
+// PandoraPFOs/Tracks ordering on the file side). Keeps tracks with
+//   lvlock == 0   (passes DELPHI's IFLSTR=11/IFLCUT=3 selection), or
+//   lvlock == -1  (input nanoaod lacks the field — be permissive so the
+//                  analysis still runs on legacy pre-LVLOCK files).
+// Drops everything else (lvlock > 0 = locked).
+inline Vec_rp
+filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
+  Vec_rp out;
+  out.reserve(rp.size());
+  for (size_t i = 0; i < rp.size(); ++i) {
+    int lv = (i < lvlock.size()) ? lvlock[i] : -1;
+    if (lv <= 0) out.push_back(rp[i]);   // 0 or -1: keep
+  }
+  return out;
+}
+
+// Full DELPHI-legacy track selection at the FCCAnalyser level, matching
+// Jingyu's `apply_track_selection_delphi` in delphi-analysis/python.
+// Applied to the *charged* RP subset (our converter is charged-only PFO):
+//
+//   sel_c = (lvlock <= 0)                                  # quality
+//         & (charge != 0)                                  # charged
+//         & (p > pT_min)                                   # momentum
+//         & (|D0| < d0_max_mm)                             # transverse IP
+//         & (|Z0 * sin θ| < z0_sin_max_mm)                 # longitudinal IP
+//         & (theta_min_rad < θ < theta_max_rad)            # polar accept
+//
+// D0 / Z0 are read off the parallel `_Tracks_trackStates` column (mm).
+// The PandoraPFOs.tracks_begin field indexes into the Tracks collection;
+// since our converter emits one TrackState per Track at AtIP, the
+// trackState index equals the track index, which equals the PFO index
+// (1:1 charged-RP : Track : trackState mapping in delphi_to_edm4hep).
+// Fall back to charge/p/θ only if the trackState lookup fails (no IP cut).
+//
+// Units: D0/Z0 in mm (EDM4hep convention), p in GeV. Defaults reproduce
+// Jingyu's nominal cuts (pT>0.4, |d0|<4cm=40mm, |z0sinθ|<4cm=40mm,
+// 20°<θ<160°).
+inline Vec_rp
+filterRP_delphi_legacy(
+    Vec_rp rp,
+    ROOT::VecOps::RVec<int> lvlock,
+    ROOT::VecOps::RVec<edm4hep::TrackState> trackStates,
+    float pT_min = 0.4f,
+    float d0_max_mm = 40.0f,
+    float z0_sin_max_mm = 40.0f,
+    float theta_min_rad = 0.349065850f,    // 20° = π/9
+    float theta_max_rad = 2.792526803f)    // 160°
+{
+  Vec_rp out;
+  out.reserve(rp.size());
+  for (size_t i = 0; i < rp.size(); ++i) {
+    int lv = (i < lvlock.size()) ? lvlock[i] : -1;
+    if (lv > 0) continue;                              // lvlock>0: drop
+    const auto &p = rp[i];
+    if (std::abs(p.charge) < 0.1f) continue;           // require charged
+    const float px = p.momentum.x;
+    const float py = p.momentum.y;
+    const float pz = p.momentum.z;
+    const float pT2 = px*px + py*py;
+    const float pMag = std::sqrt(pT2 + pz*pz);
+    if (pMag < pT_min) continue;
+    const float theta = std::atan2(std::sqrt(pT2), pz);
+    if (theta < theta_min_rad || theta > theta_max_rad) continue;
+    // IP cuts via trackState. In delphi_to_edm4hep the i-th PFO has
+    // tracks_begin = i (1:1 PFO↔Track) and one TrackState at AtIP at
+    // trackState index = i, so direct lookup is fine.
+    if (i < trackStates.size()) {
+      const auto &ts = trackStates[i];
+      const float d0 = ts.D0;
+      const float z0sin = ts.Z0 * std::sin(theta);
+      if (std::abs(d0)    > d0_max_mm)    continue;
+      if (std::abs(z0sin) > z0_sin_max_mm) continue;
+    } else {
+      continue;   // no trackState → can't apply IP cuts, drop conservatively
+    }
+    out.push_back(p);
+  }
+  return out;
+}
+
 // Permute a per-PFO int32 UserData column (e.g., Track_lvlock) from the
 // original ReconstructedParticles ordering into the RecoPartPIDAtVertex
 // ordering used elsewhere in the analysis. Returns one entry per

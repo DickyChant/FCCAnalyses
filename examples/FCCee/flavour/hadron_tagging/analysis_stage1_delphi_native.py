@@ -63,8 +63,20 @@ class RDFanalysis():
             ## throughout the FCCAnalyses helpers / Defines below.
             #############################################
             .Alias('Particle',                 'MCParticles')
-            .Alias('ReconstructedParticles',   'PandoraPFOs')
             .Alias('_EFlowTrack_trackStates',  '_Tracks_trackStates')
+
+            ## DELPHI-legacy track-quality cut applied at analysis level:
+            ## drop tracks with `Track_lvlock > 0` (locked by SKELANA).
+            ## Keep lvlock <= 0 (`0` = passes IFLSTR=11/IFLCUT=3, `-1` =
+            ## input nanoaod predates TracRaw_lvlock so we run permissively).
+            ## All downstream FCC helpers see ONLY the cleaned set.
+            ##
+            ## NOTE: the writer/converter are intentionally permissive — they
+            ## emit every reco PFO. The quality cut lives here at the
+            ## FCCAnalyser entry point so different analyses can dial it
+            ## independently if needed.
+            .Define('ReconstructedParticles',
+                    'FCCAnalyses::ZHfunctions::filterRPbyLvlock(PandoraPFOs, Track_lvlock)')
             .Alias('EFlowTrack_dNdx',          'Tracks_dNdx')
             .Alias('_EFlowTrack_dNdx_track',   '_Tracks_dNdx_track')
 
