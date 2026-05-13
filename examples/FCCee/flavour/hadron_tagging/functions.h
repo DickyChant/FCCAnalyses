@@ -241,19 +241,32 @@ hasPIDLink_onRP(Vec_rp rp,
 }
 
 // Filter a ReconstructedParticles collection by SKELANA's per-track
-// LVLOCK quality word (`Track_lvlock` UserData column, parallel to the
-// PandoraPFOs/Tracks ordering on the file side). Keeps tracks with
-//   lvlock == 0   (passes DELPHI's IFLSTR=11/IFLCUT=3 selection), or
-//   lvlock == -1  (input nanoaod lacks the field — be permissive so the
-//                  analysis still runs on legacy pre-LVLOCK files).
-// Drops everything else (lvlock > 0 = locked).
+// LVLOCK bitmask (`Track_lvlock` UserData column, parallel to the
+// PandoraPFOs/Tracks ordering on the file side). The legacy SKELANA
+// convention is `pass <=> LVLOCK == 0` (all 32 bits zero).
+//
+//   lvlock == 0          all bits clear — keep (legacy selection)
+//   lvlock == 1          bit 1: LVSELE quality fail — drop
+//   lvlock == INT32_MIN  bit 32: REMCLU calo-cluster overlap — drop
+//                                (energy already merged into a charged
+//                                 track PFO; keeping these double-counts
+//                                 calorimeter energy in thrust / EEC /
+//                                 missing-pt sums)
+//   lvlock == INT32_MIN+1 bit 32 + bit 1                       — drop
+//   lvlock == -1         input nanoaod predates the field — keep
+//                                (degrade gracefully on legacy files)
+//
+// Implementation: keep when `lvlock == 0 || lvlock == -1`. Any other
+// value is a locked Part and MUST be dropped — even when "<= 0" looks
+// inclusive (the INT32_MIN bit-32 class is < 0 numerically but is the
+// most important reject class for calorimeter energy bookkeeping).
 inline Vec_rp
 filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
   Vec_rp out;
   out.reserve(rp.size());
   for (size_t i = 0; i < rp.size(); ++i) {
     int lv = (i < lvlock.size()) ? lvlock[i] : -1;
-    if (lv <= 0) out.push_back(rp[i]);   // 0 or -1: keep
+    if (lv == 0 || lv == -1) out.push_back(rp[i]);   // strict zero (or unknown) keeps
   }
   return out;
 }
@@ -294,7 +307,9 @@ filterRP_delphi_legacy(
   out.reserve(rp.size());
   for (size_t i = 0; i < rp.size(); ++i) {
     int lv = (i < lvlock.size()) ? lvlock[i] : -1;
-    if (lv > 0) continue;                              // lvlock>0: drop
+    // SKELANA LVLOCK convention: keep iff all 32 bits zero (or no info).
+    // `lv > 0` alone misses the bit-32 REMCLU class (INT32_MIN < 0).
+    if (!(lv == 0 || lv == -1)) continue;
     const auto &p = rp[i];
     if (std::abs(p.charge) < 0.1f) continue;           // require charged
     const float px = p.momentum.x;
