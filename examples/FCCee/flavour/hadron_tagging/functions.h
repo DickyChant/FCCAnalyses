@@ -214,8 +214,7 @@ inline ROOT::VecOps::RVec<int> get_Vertex_containDescendant(
 // ReconstructedParticleData payload (cheap: track_begin is unique per RP
 // in our converter).
 inline ROOT::VecOps::RVec<int>
-hasPIDLink_onRP(Vec_rp rp,
-                Vec_rp rpAtVertex,
+hasPIDLink_onRP(Vec_rp rp, Vec_rp rpAtVertex,
                 ROOT::VecOps::RVec<podio::ObjectID> pid_to_part) {
   std::vector<bool> hasPID(rp.size(), false);
   for (auto &oid : pid_to_part) {
@@ -228,9 +227,8 @@ hasPIDLink_onRP(Vec_rp rp,
     bool flag = false;
     for (size_t j = 0; j < rp.size(); ++j) {
       if (rp[j].tracks_begin == p.tracks_begin &&
-          rp[j].tracks_end   == p.tracks_end   &&
-          rp[j].charge       == p.charge       &&
-          rp[j].energy       == p.energy) {
+          rp[j].tracks_end == p.tracks_end && rp[j].charge == p.charge &&
+          rp[j].energy == p.energy) {
         flag = hasPID[j];
         break;
       }
@@ -260,13 +258,13 @@ hasPIDLink_onRP(Vec_rp rp,
 // value is a locked Part and MUST be dropped — even when "<= 0" looks
 // inclusive (the INT32_MIN bit-32 class is < 0 numerically but is the
 // most important reject class for calorimeter energy bookkeeping).
-inline Vec_rp
-filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
+inline Vec_rp filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
   Vec_rp out;
   out.reserve(rp.size());
   for (size_t i = 0; i < rp.size(); ++i) {
     int lv = (i < lvlock.size()) ? lvlock[i] : -1;
-    if (lv == 0 || lv == -1) out.push_back(rp[i]);   // strict zero (or unknown) keeps
+    if (lv == 0 || lv == -1)
+      out.push_back(rp[i]); // strict zero (or unknown) keeps
   }
   return out;
 }
@@ -293,15 +291,12 @@ filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
 // Jingyu's nominal cuts (pT>0.4, |d0|<4cm=40mm, |z0sinθ|<4cm=40mm,
 // 20°<θ<160°).
 inline Vec_rp
-filterRP_delphi_legacy(
-    Vec_rp rp,
-    ROOT::VecOps::RVec<int> lvlock,
-    ROOT::VecOps::RVec<edm4hep::TrackState> trackStates,
-    float pT_min = 0.4f,
-    float d0_max_mm = 40.0f,
-    float z0_sin_max_mm = 40.0f,
-    float theta_min_rad = 0.349065850f,    // 20° = π/9
-    float theta_max_rad = 2.792526803f)    // 160°
+filterRP_delphi_legacy(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock,
+                       ROOT::VecOps::RVec<edm4hep::TrackState> trackStates,
+                       float pT_min = 0.4f, float d0_max_mm = 40.0f,
+                       float z0_sin_max_mm = 40.0f,
+                       float theta_min_rad = 0.349065850f, // 20° = π/9
+                       float theta_max_rad = 2.792526803f) // 160°
 {
   Vec_rp out;
   out.reserve(rp.size());
@@ -309,17 +304,21 @@ filterRP_delphi_legacy(
     int lv = (i < lvlock.size()) ? lvlock[i] : -1;
     // SKELANA LVLOCK convention: keep iff all 32 bits zero (or no info).
     // `lv > 0` alone misses the bit-32 REMCLU class (INT32_MIN < 0).
-    if (!(lv == 0 || lv == -1)) continue;
+    if (!(lv == 0 || lv == -1))
+      continue;
     const auto &p = rp[i];
-    if (std::abs(p.charge) < 0.1f) continue;           // require charged
+    if (std::abs(p.charge) < 0.1f)
+      continue; // require charged
     const float px = p.momentum.x;
     const float py = p.momentum.y;
     const float pz = p.momentum.z;
-    const float pT2 = px*px + py*py;
-    const float pMag = std::sqrt(pT2 + pz*pz);
-    if (pMag < pT_min) continue;
+    const float pT2 = px * px + py * py;
+    const float pMag = std::sqrt(pT2 + pz * pz);
+    if (pMag < pT_min)
+      continue;
     const float theta = std::atan2(std::sqrt(pT2), pz);
-    if (theta < theta_min_rad || theta > theta_max_rad) continue;
+    if (theta < theta_min_rad || theta > theta_max_rad)
+      continue;
     // IP cuts via trackState. In delphi_to_edm4hep the i-th PFO has
     // tracks_begin = i (1:1 PFO↔Track) and one TrackState at AtIP at
     // trackState index = i, so direct lookup is fine.
@@ -327,10 +326,12 @@ filterRP_delphi_legacy(
       const auto &ts = trackStates[i];
       const float d0 = ts.D0;
       const float z0sin = ts.Z0 * std::sin(theta);
-      if (std::abs(d0)    > d0_max_mm)    continue;
-      if (std::abs(z0sin) > z0_sin_max_mm) continue;
+      if (std::abs(d0) > d0_max_mm)
+        continue;
+      if (std::abs(z0sin) > z0_sin_max_mm)
+        continue;
     } else {
-      continue;   // no trackState → can't apply IP cuts, drop conservatively
+      continue; // no trackState → can't apply IP cuts, drop conservatively
     }
     out.push_back(p);
   }
@@ -341,19 +342,16 @@ filterRP_delphi_legacy(
 // original ReconstructedParticles ordering into the RecoPartPIDAtVertex
 // ordering used elsewhere in the analysis. Returns one entry per
 // rpAtVertex element. Falls back to -1 if no matching original RP found.
-inline ROOT::VecOps::RVec<int>
-permuteIntOnRP(Vec_rp rp,
-               Vec_rp rpAtVertex,
-               ROOT::VecOps::RVec<int> flat) {
+inline ROOT::VecOps::RVec<int> permuteIntOnRP(Vec_rp rp, Vec_rp rpAtVertex,
+                                              ROOT::VecOps::RVec<int> flat) {
   ROOT::VecOps::RVec<int> result;
   result.reserve(rpAtVertex.size());
   for (auto &p : rpAtVertex) {
     int value = -1;
     for (size_t j = 0; j < rp.size() && j < flat.size(); ++j) {
       if (rp[j].tracks_begin == p.tracks_begin &&
-          rp[j].tracks_end   == p.tracks_end   &&
-          rp[j].charge       == p.charge       &&
-          rp[j].energy       == p.energy) {
+          rp[j].tracks_end == p.tracks_end && rp[j].charge == p.charge &&
+          rp[j].energy == p.energy) {
         value = flat[j];
         break;
       }
