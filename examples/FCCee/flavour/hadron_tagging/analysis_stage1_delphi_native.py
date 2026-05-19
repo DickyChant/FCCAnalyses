@@ -150,7 +150,13 @@ class RDFanalysis():
             .Define('MC_Vertex_PDG',         'myUtils::get_MCpdgMCVertex(MCVertexObject, Particle)')
             .Define('MC_Vertex_PDGmother',   'myUtils::get_MCpdgMotherMCVertex(MCVertexObject, Particle)')
             .Define('MC_Vertex_PDGgmother',  'myUtils::get_MCpdgGMotherMCVertex(MCVertexObject, Particle)')
-            .Define('MC_PV_xyzt', 'FCCAnalyses::MCParticle::get_EventPrimaryVertexP4()(Particle)')
+            ## MC primary vertex. FCCAnalyses' stock
+            ## `MCParticle::get_EventPrimaryVertexP4()` reads
+            ## `MCParticles[0].vertex`, which on DELPHI-native EDM4hep is the
+            ## incoming-beam particle (generatorStatus==21) sitting at (0,0,0).
+            ## Use a status==1 production vertex instead — every status==1
+            ## particle in an event shares the same production point.
+            .Define('MC_PV_xyzt',     'FCCAnalyses::ZHfunctions::get_MC_PV_status1(Particle)')
 
             #############################################
             ## RECO vertex object
@@ -350,13 +356,25 @@ class RDFanalysis():
             #############################################
             ## PV — both reco PV and offset vs. MC truth
             #############################################
-            .Define('PV_x',          'Vertex_x[Vertex_isPV==1]')
-            .Define('PV_y',          'Vertex_y[Vertex_isPV==1]')
-            .Define('PV_z',          'Vertex_z[Vertex_isPV==1]')
+            ## FCC re-fit PV (from `myUtils::get_VertexObject`). Useful for
+            ## reco-vs-reco closure between the FCC vertexing and the
+            ## converter's PrimaryVertex, but it returns coordinates that are
+            ## NOT in the same frame as the file PV (BS-prior subtraction +
+            ## a different fitter), so don't use it for data/MC PV closure.
+            .Define('PVfit_x',       'Vertex_x[Vertex_isPV==1]')
+            .Define('PVfit_y',       'Vertex_y[Vertex_isPV==1]')
+            .Define('PVfit_z',       'Vertex_z[Vertex_isPV==1]')
             .Define('PV_ntrk',       'Vertex_ntrk[Vertex_isPV==1]')
-            .Define('PV_x_offset',   'PV_x - MC_PV_xyzt.X()')
-            .Define('PV_y_offset',   'PV_y - MC_PV_xyzt.Y()')
-            .Define('PV_z_offset',   'PV_z - MC_PV_xyzt.Z()')
+
+            ## File-side reco PV — the converter-written PrimaryVertex
+            ## collection (one entry per event in our converter). This is
+            ## the right PV for data/MC closure on PV offsets.
+            .Define('PV_x',          'float(PrimaryVertex.position.x[0])')
+            .Define('PV_y',          'float(PrimaryVertex.position.y[0])')
+            .Define('PV_z',          'float(PrimaryVertex.position.z[0])')
+            .Define('PV_x_offset',   'PV_x - float(MC_PV_xyzt.X())')
+            .Define('PV_y_offset',   'PV_y - float(MC_PV_xyzt.Y())')
+            .Define('PV_z_offset',   'PV_z - float(MC_PV_xyzt.Z())')
         )
         return df2
 
@@ -403,4 +421,5 @@ class RDFanalysis():
 
             'PV_x', 'PV_y', 'PV_z', 'PV_ntrk',
             'PV_x_offset', 'PV_y_offset', 'PV_z_offset',
+            'PVfit_x', 'PVfit_y', 'PVfit_z',
         ]

@@ -92,6 +92,29 @@ get_Vertex_p4(ROOT::VecOps::RVec<VertexingUtils::FCCAnalysesVertex> vertex,
   return result;
 }
 
+// True MC primary vertex from the MCParticles tree. The FCCAnalyses
+// stock helper `MCParticle::get_EventPrimaryVertexP4()` reads
+// `MCParticles[0].vertex`, but on DELPHI-native EDM4hep that slot is
+// the incoming beam particle (generatorStatus == 21) at the
+// conventional origin (0,0,0). The real MC PV lives in the production
+// vertex of any final-state (status == 1) particle — all status==1
+// particles in an event share the same production point — so we walk
+// to the first one and read its `vertex` field.
+inline TLorentzVector
+get_MC_PV_status1(ROOT::VecOps::RVec<edm4hep::MCParticleData> in) {
+  TLorentzVector tlv;
+  for (auto &p : in) {
+    if (p.generatorStatus == 1) {
+      tlv.SetXYZT(p.vertex.x, p.vertex.y, p.vertex.z, p.time);
+      return tlv;
+    }
+  }
+  // Fallback: MCParticles[0].vertex (the FCCAnalyses default behaviour).
+  if (!in.empty())
+    tlv.SetXYZT(in[0].vertex.x, in[0].vertex.y, in[0].vertex.z, in[0].time);
+  return tlv;
+}
+
 // Modern equivalent of the legacy `vertex.primary == 1` check. In EDM4hep 1.0
 // `Vertex::primary` is gone; the type is encoded in a bitfield (BITPrimary
 // = bit 1). FCCAnalyses' `VertexFitter` writes `vertex.type = Primary`
