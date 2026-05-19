@@ -65,18 +65,20 @@ class RDFanalysis():
             .Alias('Particle',                 'MCParticles')
             .Alias('_EFlowTrack_trackStates',  '_Tracks_trackStates')
 
-            ## DELPHI-legacy track-quality cut applied at analysis level:
-            ## drop tracks with `Track_lvlock > 0` (locked by SKELANA).
-            ## Keep lvlock <= 0 (`0` = passes IFLSTR=11/IFLCUT=3, `-1` =
-            ## input nanoaod predates TracRaw_lvlock so we run permissively).
-            ## All downstream FCC helpers see ONLY the cleaned set.
-            ##
-            ## NOTE: the writer/converter are intentionally permissive — they
-            ## emit every reco PFO. The quality cut lives here at the
-            ## FCCAnalyser entry point so different analyses can dial it
-            ## independently if needed.
-            .Define('ReconstructedParticles',
-                    'FCCAnalyses::ZHfunctions::filterRPbyLvlock(PandoraPFOs, Track_lvlock)')
+            ## DELPHI-legacy track-quality cut: SKELANA `LVLOCK == 0`
+            ## (with -1 allowed as the legacy-no-info value). The writer
+            ## emits every PFO so the cut lives at the FCCAnalyser entry
+            ## point. IMPORTANT: do NOT shrink the RP collection before
+            ## vertexing — `MCRecoAssociations_to.index` from the writer
+            ## points into the ORIGINAL PandoraPFOs ordering, and the
+            ## `get_VertexObject` / `myUtils::PID` / `getRP2MC_index`
+            ## helpers will segfault if we re-index out from under those
+            ## relations. Instead, alias the unfiltered collection, expose
+            ## the lvlock-pass flag as a parallel mask, and use it as a
+            ## per-RP cut downstream (or as the BDT input cut later).
+            .Alias('ReconstructedParticles',   'PandoraPFOs')
+            .Define('RP_passLvlock_input',
+                    'FCCAnalyses::ZHfunctions::lvlockPassMask(PandoraPFOs, Track_lvlock)')
             .Alias('EFlowTrack_dNdx',          'Tracks_dNdx')
             .Alias('_EFlowTrack_dNdx_track',   '_Tracks_dNdx_track')
 
@@ -254,8 +256,16 @@ class RDFanalysis():
             ## column is parallel to RP_e/RP_px/etc.
             ##   -1 = input lacks the field (e.g. pre-LVLOCK nanoaod)
             ##    0 = passes legacy IFLSTR=11/IFLCUT=3 selection
-            ##   >0 = locked. Apply `RP_lvlock == 0` for the standard cut.
-            .Define('RP_lvlock',   'FCCAnalyses::ZHfunctions::permuteIntOnRP(ReconstructedParticles, RecoPartPIDAtVertex, Track_lvlock)')
+            ##   >0 = locked. Apply `RP_lvlock == 0` for the standard cut
+            ##         OR use the pre-computed `RP_passLvlock` flag (0/1).
+            ## NOTE on bit-32 (REMCLU) values: SKELANA writes lvlock as a
+            ## signed int32 bitmask, so the bit-32-only state shows up as
+            ## INT32_MIN (-2147483648). Use `RP_passLvlock == 1` rather
+            ## than `RP_lvlock <= 0` to capture the REMCLU class.
+            .Define('RP_lvlock',
+                    'FCCAnalyses::ZHfunctions::permuteIntOnRP(ReconstructedParticles, RecoPartPIDAtVertex, Track_lvlock)')
+            .Define('RP_passLvlock',
+                    'FCCAnalyses::ZHfunctions::permuteIntOnRP(ReconstructedParticles, RecoPartPIDAtVertex, RP_passLvlock_input)')
 
             .Define('RP_nMC',     'FCCAnalyses::ZHfunctions::getRP2MC_nMC(MCRecoAssociations0, MCRecoAssociations1, RecoPartPIDAtVertex)')
             .Define('RP_MCidx',   'ReconstructedParticle2MC::getRP2MC_index(MCRecoAssociations0, MCRecoAssociations1, RecoPartPIDAtVertex)')
@@ -367,7 +377,7 @@ class RDFanalysis():
             'RP_px', 'RP_py', 'RP_pz', 'RP_phi', 'RP_theta', 'RP_charge',
             'RP_thrustangle', 'RP_fromPV', 'RP_vert_ind',
             'RP_trk_d0', 'RP_trk_z0', 'RP_trk_phi', 'RP_trk_omega', 'RP_trk_tanLambda',
-            'RP_dndx', 'RP_isMu', 'RP_isEl', 'RP_hasRich', 'RP_lvlock',
+            'RP_dndx', 'RP_isMu', 'RP_isEl', 'RP_hasRich', 'RP_lvlock', 'RP_passLvlock',
             'RP_nMC', 'RP_MCidx',
             'RP_fromBs', 'RP_fromBu', 'RP_fromBd', 'RP_fromBc', 'RP_fromLb',
 

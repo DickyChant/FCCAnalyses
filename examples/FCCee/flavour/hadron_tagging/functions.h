@@ -258,6 +258,15 @@ hasPIDLink_onRP(Vec_rp rp, Vec_rp rpAtVertex,
 // value is a locked Part and MUST be dropped — even when "<= 0" looks
 // inclusive (the INT32_MIN bit-32 class is < 0 numerically but is the
 // most important reject class for calorimeter energy bookkeeping).
+//
+// CAVEAT: this function changes the size and indexing of the returned
+// collection. `MCRecoAssociations_to.index` from the writer points into
+// the *original* PandoraPFOs ordering, so passing the filtered output
+// to any helper that consumes `MCRecoAssociations*` (notably
+// `myUtils::get_VertexObject`, `myUtils::PID`, `getRP2MC_index`) reads
+// past the end and segfaults. For stage1 use `lvlockPassMask` to get a
+// per-RP `int` flag parallel to PandoraPFOs and apply the selection at
+// the analysis output level, not before vertexing.
 inline Vec_rp filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
   Vec_rp out;
   out.reserve(rp.size());
@@ -265,6 +274,21 @@ inline Vec_rp filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
     int lv = (i < lvlock.size()) ? lvlock[i] : -1;
     if (lv == 0 || lv == -1)
       out.push_back(rp[i]); // strict zero (or unknown) keeps
+  }
+  return out;
+}
+
+// Per-RP `passes-LVLOCK` flag, parallel to `rp` (= PandoraPFOs on file).
+// 1 = keep (lvlock == 0 or -1), 0 = drop. Same semantics as
+// `filterRPbyLvlock` but as a mask — preserves the original RP indexing
+// so MCRecoAssociations / Vertex helpers stay valid.
+inline ROOT::VecOps::RVec<int>
+lvlockPassMask(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
+  ROOT::VecOps::RVec<int> out;
+  out.reserve(rp.size());
+  for (size_t i = 0; i < rp.size(); ++i) {
+    int lv = (i < lvlock.size()) ? lvlock[i] : -1;
+    out.push_back((lv == 0 || lv == -1) ? 1 : 0);
   }
   return out;
 }

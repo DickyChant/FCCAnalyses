@@ -59,6 +59,33 @@ The flavor labels cleanly separate Z→bb (heavy-flavor) from Z→light
 (prompt-only). RP-level d0 distribution centered at 0 with hadronic-decay
 tail.
 
+## LVLOCK selection (DELPHI-native variant only)
+
+`analysis_stage1_delphi_native.py` exposes SKELANA's per-PFO `Track_lvlock`
+quality word as two parallel columns on the stage1 ntuple:
+
+- `RP_lvlock` — the raw signed-int32 bitmask, in `RecoPartPIDAtVertex`
+  order. `0` = pass, `1` = LVSELE fail, `INT32_MIN` = REMCLU
+  calo-cluster overlap (bit 32), `INT32_MIN+1` = both, `-1` = nanoaod
+  predates the field.
+- `RP_passLvlock` — `0/1` mask, `1 ⇔ lvlock == 0 || lvlock == -1`.
+  Apply this as a per-RP cut at the analysis output level (e.g., when
+  filling per-RP histograms or selecting BDT inputs).
+
+Do **not** filter `ReconstructedParticles` with `filterRPbyLvlock` before
+calling `myUtils::get_VertexObject` / `myUtils::PID` / `getRP2MC_index`
+— those helpers consume `MCRecoAssociations*.index` written against
+the original `PandoraPFOs` ordering and segfault when the collection
+is silently re-indexed under them (observed on
+`/eos/experiment/eealliance/Users/zhangj/edm4hep/edm4hep/events_qq_*.edm4hep.root`,
+which is the first sample to actually carry non-zero LVLOCK bits).
+The `lvlockPassMask` helper added in `functions.h` produces the
+parallel-to-PandoraPFOs flag without rewriting the collection.
+
+Always use `RP_passLvlock == 1` rather than `RP_lvlock <= 0`: the
+REMCLU class (bit 32) decodes as INT32_MIN which is numerically
+negative, so `<=0` keeps it by mistake.
+
 ## Modern-stack quirks
 
 Several FCCAnalyses helpers depend on EDM4hep 0.x field names that were
