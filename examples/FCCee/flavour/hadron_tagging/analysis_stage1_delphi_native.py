@@ -141,6 +141,41 @@ class RDFanalysis():
             .Define('genLb_pz', 'FCCAnalyses::MCParticle::get_pz(genLb)')
 
             #############################################
+            ## Gen C-hadron / c-quark counters
+            ## (inclusive c-hemisphere truth tag)
+            #############################################
+            .Define('genCharm',     'FCCAnalyses::MCParticle::sel_pdgID(4, true)(Particle)')
+            .Define('n_genCharms',  'FCCAnalyses::MCParticle::get_n(genCharm)')
+            .Define('genCharm_px',  'FCCAnalyses::MCParticle::get_px(genCharm)')
+            .Define('genCharm_py',  'FCCAnalyses::MCParticle::get_py(genCharm)')
+            .Define('genCharm_pz',  'FCCAnalyses::MCParticle::get_pz(genCharm)')
+            .Define('genCharm_pdg', 'FCCAnalyses::MCParticle::get_pdg(genCharm)')
+
+            .Define('genD0', 'FCCAnalyses::MCParticle::sel_pdgID(421, true)(Particle)')
+            .Define('n_genD0', 'FCCAnalyses::MCParticle::get_n(genD0)')
+            .Define('genD0_px', 'FCCAnalyses::MCParticle::get_px(genD0)')
+            .Define('genD0_py', 'FCCAnalyses::MCParticle::get_py(genD0)')
+            .Define('genD0_pz', 'FCCAnalyses::MCParticle::get_pz(genD0)')
+
+            .Define('genDp', 'FCCAnalyses::MCParticle::sel_pdgID(411, true)(Particle)')
+            .Define('n_genDp', 'FCCAnalyses::MCParticle::get_n(genDp)')
+            .Define('genDp_px', 'FCCAnalyses::MCParticle::get_px(genDp)')
+            .Define('genDp_py', 'FCCAnalyses::MCParticle::get_py(genDp)')
+            .Define('genDp_pz', 'FCCAnalyses::MCParticle::get_pz(genDp)')
+
+            .Define('genDs', 'FCCAnalyses::MCParticle::sel_pdgID(431, true)(Particle)')
+            .Define('n_genDs', 'FCCAnalyses::MCParticle::get_n(genDs)')
+            .Define('genDs_px', 'FCCAnalyses::MCParticle::get_px(genDs)')
+            .Define('genDs_py', 'FCCAnalyses::MCParticle::get_py(genDs)')
+            .Define('genDs_pz', 'FCCAnalyses::MCParticle::get_pz(genDs)')
+
+            .Define('genLc', 'FCCAnalyses::MCParticle::sel_pdgID(4122, true)(Particle)')
+            .Define('n_genLc', 'FCCAnalyses::MCParticle::get_n(genLc)')
+            .Define('genLc_px', 'FCCAnalyses::MCParticle::get_px(genLc)')
+            .Define('genLc_py', 'FCCAnalyses::MCParticle::get_py(genLc)')
+            .Define('genLc_pz', 'FCCAnalyses::MCParticle::get_pz(genLc)')
+
+            #############################################
             ## MC vertex object + MC PV
             #############################################
             .Define('MCVertexObject', 'myUtils::get_MCVertexObject(Particle, Particle0)')
@@ -281,11 +316,20 @@ class RDFanalysis():
             .Define('RP_fromBc',  'FCCAnalyses::ZHfunctions::get_RP_isDescendant(541,  true)(RP_MCidx, Particle, Particle1)')
             .Define('RP_fromLb',  'FCCAnalyses::ZHfunctions::get_RP_isDescendant(5122, true)(RP_MCidx, Particle, Particle1)')
 
+            ## Inclusive C-hadron descendant tag — any RP that is a stable
+            ## descendant of D⁰(421) / D⁺(411) / D_s(431) / Λc(4122).
+            .Define('RP_fromD',
+                    'FCCAnalyses::ZHfunctions::get_RP_isDescendantAny(std::vector<int>{421,411,431,4122}, true)(RP_MCidx, Particle, Particle1)')
+            ## Convenience aggregate: any heavy-flavor (b OR c OR Λb).
+            .Define('RP_fromHF',
+                    'ROOT::VecOps::RVec<int>(((RP_fromBs+RP_fromBu+RP_fromBd+RP_fromBc+RP_fromLb+RP_fromD) > 0))')
+
             .Define('Vertex_fromBs', 'FCCAnalyses::ZHfunctions::get_Vertex_containDescendant(VertexObject, RP_fromBs)')
             .Define('Vertex_fromBu', 'FCCAnalyses::ZHfunctions::get_Vertex_containDescendant(VertexObject, RP_fromBu)')
             .Define('Vertex_fromBd', 'FCCAnalyses::ZHfunctions::get_Vertex_containDescendant(VertexObject, RP_fromBd)')
             .Define('Vertex_fromBc', 'FCCAnalyses::ZHfunctions::get_Vertex_containDescendant(VertexObject, RP_fromBc)')
             .Define('Vertex_fromLb', 'FCCAnalyses::ZHfunctions::get_Vertex_containDescendant(VertexObject, RP_fromLb)')
+            .Define('Vertex_fromD',  'FCCAnalyses::ZHfunctions::get_Vertex_containDescendant(VertexObject, RP_fromD)')
 
             #############################################
             ## Thrust + hemisphere split
@@ -328,6 +372,13 @@ class RDFanalysis():
             .Define('genBc_thrustangle', 'Algorithms::getAxisCosTheta(EVT_thrust, genBc_px, genBc_py, genBc_pz)')
             .Define('genLb_thrustangle', 'Algorithms::getAxisCosTheta(EVT_thrust, genLb_px, genLb_py, genLb_pz)')
 
+            ## c-hadron thrust angles (used by hemisphere label_C_*)
+            .Define('genCharm_thrustangle', 'Algorithms::getAxisCosTheta(EVT_thrust, genCharm_px, genCharm_py, genCharm_pz)')
+            .Define('genD0_thrustangle',    'Algorithms::getAxisCosTheta(EVT_thrust, genD0_px, genD0_py, genD0_pz)')
+            .Define('genDp_thrustangle',    'Algorithms::getAxisCosTheta(EVT_thrust, genDp_px, genDp_py, genDp_pz)')
+            .Define('genDs_thrustangle',    'Algorithms::getAxisCosTheta(EVT_thrust, genDs_px, genDs_py, genDs_pz)')
+            .Define('genLc_thrustangle',    'Algorithms::getAxisCosTheta(EVT_thrust, genLc_px, genLc_py, genLc_pz)')
+
             #############################################
             ## Per-hemisphere truth labels
             #############################################
@@ -342,6 +393,19 @@ class RDFanalysis():
             .Define('label_Bc_Emin', 'int(n_Bc_Emin==1 && n_Bs_Emin==0 && n_Bu_Emin==0 && n_Bd_Emin==0 && n_Lb_Emin==0)')
             .Define('label_Lb_Emin', 'int(n_Bc_Emin==0 && n_Bs_Emin==0 && n_Bu_Emin==0 && n_Bd_Emin==0 && n_Lb_Emin==1)')
 
+            ## Heavy-flavor count = any of the five B species (incl. Λb).
+            .Define('n_B_Emin',   'int(n_Bs_Emin + n_Bu_Emin + n_Bd_Emin + n_Bc_Emin + n_Lb_Emin)')
+            ## Inclusive C count: D⁰ + D⁺ + D_s + Λc with positive thrust cosine.
+            .Define('n_D0_Emin', 'int(genD0_thrustangle[genD0_thrustangle>0].size())')
+            .Define('n_Dp_Emin', 'int(genDp_thrustangle[genDp_thrustangle>0].size())')
+            .Define('n_Ds_Emin', 'int(genDs_thrustangle[genDs_thrustangle>0].size())')
+            .Define('n_Lc_Emin', 'int(genLc_thrustangle[genLc_thrustangle>0].size())')
+            .Define('n_C_Emin',  'int(n_D0_Emin + n_Dp_Emin + n_Ds_Emin + n_Lc_Emin)')
+            ## label_C: ≥1 C-hadron AND no B-hadron in this hemisphere.
+            .Define('label_C_Emin',     'int(n_C_Emin >= 1 && n_B_Emin == 0)')
+            ## label_udsg: no heavy-flavor hadron of any kind (light hemisphere).
+            .Define('label_udsg_Emin',  'int(n_B_Emin == 0 && n_C_Emin == 0)')
+
             .Define('n_Bs_Emax', 'int(genBs_thrustangle[genBs_thrustangle<0].size())')
             .Define('n_Bu_Emax', 'int(genBu_thrustangle[genBu_thrustangle<0].size())')
             .Define('n_Bd_Emax', 'int(genBd_thrustangle[genBd_thrustangle<0].size())')
@@ -352,6 +416,15 @@ class RDFanalysis():
             .Define('label_Bd_Emax', 'int(n_Bc_Emax==0 && n_Bs_Emax==0 && n_Bu_Emax==0 && n_Bd_Emax==1 && n_Lb_Emax==0)')
             .Define('label_Bc_Emax', 'int(n_Bc_Emax==1 && n_Bs_Emax==0 && n_Bu_Emax==0 && n_Bd_Emax==0 && n_Lb_Emax==0)')
             .Define('label_Lb_Emax', 'int(n_Bc_Emax==0 && n_Bs_Emax==0 && n_Bu_Emax==0 && n_Bd_Emax==0 && n_Lb_Emax==1)')
+
+            .Define('n_B_Emax',  'int(n_Bs_Emax + n_Bu_Emax + n_Bd_Emax + n_Bc_Emax + n_Lb_Emax)')
+            .Define('n_D0_Emax', 'int(genD0_thrustangle[genD0_thrustangle<0].size())')
+            .Define('n_Dp_Emax', 'int(genDp_thrustangle[genDp_thrustangle<0].size())')
+            .Define('n_Ds_Emax', 'int(genDs_thrustangle[genDs_thrustangle<0].size())')
+            .Define('n_Lc_Emax', 'int(genLc_thrustangle[genLc_thrustangle<0].size())')
+            .Define('n_C_Emax',  'int(n_D0_Emax + n_Dp_Emax + n_Ds_Emax + n_Lc_Emax)')
+            .Define('label_C_Emax',     'int(n_C_Emax >= 1 && n_B_Emax == 0)')
+            .Define('label_udsg_Emax',  'int(n_B_Emax == 0 && n_C_Emax == 0)')
 
             #############################################
             ## PV — both reco PV and offset vs. MC truth
@@ -375,6 +448,33 @@ class RDFanalysis():
             .Define('PV_x_offset',   'PV_x - float(MC_PV_xyzt.X())')
             .Define('PV_y_offset',   'PV_y - float(MC_PV_xyzt.Y())')
             .Define('PV_z_offset',   'PV_z - float(MC_PV_xyzt.Z())')
+
+            #############################################
+            ## Secondary vertices — exposed from the converter's
+            ## SecondaryVertices collection (pair-seed-and-add fits from
+            ## delphi-improved-reco/reco/vertex/sv_reco.cpp). Position,
+            ## chi²/ndf, and displacement from PV are available. The
+            ## constituent track relation `_SecondaryVertices_particles`
+            ## is empty on this generation of files, so SV_ntrk == 0
+            ## everywhere and SV_mass cannot be computed at the analysis
+            ## level — that needs a converter-side fix. `SV_inDet` flags
+            ## SVs whose position is plausibly inside the tracker
+            ## (|d3D|<5cm, |z|<15cm) — pair-seed sometimes produces
+            ## extrapolation outliers at O(1 m).
+            #############################################
+            .Define('SV_n',     'FCCAnalyses::ZHfunctions::get_SV_n(SecondaryVertices)')
+            .Define('SV_x',     'FCCAnalyses::ZHfunctions::get_SV_x(SecondaryVertices)')
+            .Define('SV_y',     'FCCAnalyses::ZHfunctions::get_SV_y(SecondaryVertices)')
+            .Define('SV_z',     'FCCAnalyses::ZHfunctions::get_SV_z(SecondaryVertices)')
+            .Define('SV_chi2',  'FCCAnalyses::ZHfunctions::get_SV_chi2(SecondaryVertices)')
+            .Define('SV_ndf',   'FCCAnalyses::ZHfunctions::get_SV_ndf(SecondaryVertices)')
+            .Define('SV_ntrk',  'FCCAnalyses::ZHfunctions::get_SV_ntrk(SecondaryVertices)')
+            .Define('SV_d2PV',  'FCCAnalyses::ZHfunctions::get_SV_d2PV(SecondaryVertices, PV_x, PV_y, PV_z, -1)')
+            .Define('SV_d2PVx', 'FCCAnalyses::ZHfunctions::get_SV_d2PV(SecondaryVertices, PV_x, PV_y, PV_z, 0)')
+            .Define('SV_d2PVy', 'FCCAnalyses::ZHfunctions::get_SV_d2PV(SecondaryVertices, PV_x, PV_y, PV_z, 1)')
+            .Define('SV_d2PVz', 'FCCAnalyses::ZHfunctions::get_SV_d2PV(SecondaryVertices, PV_x, PV_y, PV_z, 2)')
+            .Define('SV_inDet', 'FCCAnalyses::ZHfunctions::get_SV_inDet(SecondaryVertices, PV_x, PV_y, PV_z)')
+            .Define('SV_n_inDet', 'int(ROOT::VecOps::Sum(SV_inDet))')
         )
         return df2
 
@@ -389,6 +489,13 @@ class RDFanalysis():
             'genBc_px', 'genBc_py', 'genBc_pz',
             'genLb_px', 'genLb_py', 'genLb_pz',
 
+            'n_genCharms', 'n_genD0', 'n_genDp', 'n_genDs', 'n_genLc',
+            'genCharm_px', 'genCharm_py', 'genCharm_pz', 'genCharm_pdg',
+            'genD0_px', 'genD0_py', 'genD0_pz',
+            'genDp_px', 'genDp_py', 'genDp_pz',
+            'genDs_px', 'genDs_py', 'genDs_pz',
+            'genLc_px', 'genLc_py', 'genLc_pz',
+
             'recoEmiss_px', 'recoEmiss_py', 'recoEmiss_pz', 'recoEmiss_e',
 
             'RP_n', 'RP_e', 'RP_m_reco',
@@ -398,6 +505,7 @@ class RDFanalysis():
             'RP_dndx', 'RP_isMu', 'RP_isEl', 'RP_hasRich', 'RP_lvlock', 'RP_passLvlock',
             'RP_nMC', 'RP_MCidx',
             'RP_fromBs', 'RP_fromBu', 'RP_fromBd', 'RP_fromBc', 'RP_fromLb',
+            'RP_fromD', 'RP_fromHF',
 
             'Vertex_n', 'Vertex_x', 'Vertex_y', 'Vertex_z',
             'Vertex_xErr', 'Vertex_yErr', 'Vertex_zErr', 'Vertex_chi2',
@@ -405,6 +513,7 @@ class RDFanalysis():
             'Vertex_d2PV', 'Vertex_d2PVx', 'Vertex_d2PVy', 'Vertex_d2PVz',
             'Vertex_d2PVErr', 'Vertex_d2PVSig',
             'Vertex_fromBs', 'Vertex_fromBu', 'Vertex_fromBd', 'Vertex_fromBc', 'Vertex_fromLb',
+            'Vertex_fromD',
 
             'EVT_Thrust_Mag', 'EVT_thrust_phi', 'EVT_thrust_theta',
             'EVT_ThrustEmin_E', 'EVT_ThrustEmin_Echarged', 'EVT_ThrustEmin_Eneutral',
@@ -414,12 +523,24 @@ class RDFanalysis():
 
             'genBs_thrustangle', 'genBu_thrustangle', 'genBd_thrustangle',
             'genBc_thrustangle', 'genLb_thrustangle',
+            'genCharm_thrustangle', 'genD0_thrustangle', 'genDp_thrustangle',
+            'genDs_thrustangle', 'genLc_thrustangle',
             'n_Bs_Emin', 'n_Bu_Emin', 'n_Bd_Emin', 'n_Bc_Emin', 'n_Lb_Emin',
+            'n_B_Emin', 'n_D0_Emin', 'n_Dp_Emin', 'n_Ds_Emin', 'n_Lc_Emin', 'n_C_Emin',
             'label_Bs_Emin', 'label_Bu_Emin', 'label_Bd_Emin', 'label_Bc_Emin', 'label_Lb_Emin',
+            'label_C_Emin', 'label_udsg_Emin',
             'n_Bs_Emax', 'n_Bu_Emax', 'n_Bd_Emax', 'n_Bc_Emax', 'n_Lb_Emax',
+            'n_B_Emax', 'n_D0_Emax', 'n_Dp_Emax', 'n_Ds_Emax', 'n_Lc_Emax', 'n_C_Emax',
             'label_Bs_Emax', 'label_Bu_Emax', 'label_Bd_Emax', 'label_Bc_Emax', 'label_Lb_Emax',
+            'label_C_Emax', 'label_udsg_Emax',
 
             'PV_x', 'PV_y', 'PV_z', 'PV_ntrk',
             'PV_x_offset', 'PV_y_offset', 'PV_z_offset',
             'PVfit_x', 'PVfit_y', 'PVfit_z',
+
+            'SV_n', 'SV_n_inDet',
+            'SV_x', 'SV_y', 'SV_z',
+            'SV_chi2', 'SV_ndf', 'SV_ntrk',
+            'SV_d2PV', 'SV_d2PVx', 'SV_d2PVy', 'SV_d2PVz',
+            'SV_inDet',
         ]

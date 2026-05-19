@@ -25,6 +25,7 @@
 #include "edm4hep/ReconstructedParticleData.h"
 #include "edm4hep/TrackData.h"
 #include "edm4hep/TrackState.h"
+#include "edm4hep/VertexData.h"
 
 namespace FCCAnalyses {
 namespace ZHfunctions {
@@ -196,6 +197,49 @@ struct get_RP_isDescendant {
       const bool match = m_chargeconjugate
                              ? (std::abs(p.PDG) == std::abs(m_pdg))
                              : (p.PDG == m_pdg);
+      if (match) {
+        std::vector<int> rr =
+            MCParticle::get_list_of_stable_particles_from_decay(i, in, ind);
+        descd.insert(descd.end(), rr.begin(), rr.end());
+      }
+    }
+    ROOT::VecOps::RVec<int> result;
+    result.resize(reco_mcidx.size(), 0);
+    for (size_t i = 0; i < reco_mcidx.size(); ++i) {
+      if (std::find(descd.begin(), descd.end(), reco_mcidx[i]) != descd.end())
+        result[i] = 1;
+    }
+    return result;
+  }
+};
+
+// Same as get_RP_isDescendant but accepts a list of PDGs and marks RPs
+// whose truth-matched MCParticle descends from ANY of them. Used for
+// inclusive c-hadron tagging (D⁰/D⁺/D_s/Λc) and for the "no heavy
+// flavor" light-flavor label.
+struct get_RP_isDescendantAny {
+  std::vector<int> m_pdgs;
+  bool m_chargeconjugate = true;
+
+  get_RP_isDescendantAny(std::vector<int> arg_pdgs, bool arg_cc)
+      : m_pdgs(std::move(arg_pdgs)), m_chargeconjugate(arg_cc) {}
+
+  ROOT::VecOps::RVec<int>
+  operator()(ROOT::VecOps::RVec<int> reco_mcidx,
+             ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+             ROOT::VecOps::RVec<int> ind) {
+    ROOT::VecOps::RVec<int> descd;
+    for (size_t i = 0; i < in.size(); ++i) {
+      const auto &p = in[i];
+      bool match = false;
+      for (int q : m_pdgs) {
+        const bool m = m_chargeconjugate ? (std::abs(p.PDG) == std::abs(q))
+                                         : (p.PDG == q);
+        if (m) {
+          match = true;
+          break;
+        }
+      }
       if (match) {
         std::vector<int> rr =
             MCParticle::get_list_of_stable_particles_from_decay(i, in, ind);
@@ -439,6 +483,109 @@ get_RP_dndx(Vec_rp in, ROOT::VecOps::RVec<edm4hep::RecDqdxData> dNdx,
     result.push_back(dNdx[k].dQdx.value);
   }
   return result;
+}
+
+// =================== Secondary Vertex accessors ====================
+// Modern EDM4hep 1.0 stores secondary vertices in their own collection
+// (`SecondaryVertices`) as `edm4hep::Vertex`. `delphi_to_edm4hep` writes
+// position + chi² + ndf for every SV found by the pair-seed-and-add SV
+// finder, but the constituent track relation
+// (`_SecondaryVertices_particles`) is empty on this generation of files
+// (`particles_end == particles_begin`). So SV_mass and per-track SV
+// linkage are not derivable on the analysis side — they need a
+// converter-side fix. Everything else (position, chi², displacement
+// from PV, quality flag) is here.
+
+inline int get_SV_n(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
+  return static_cast<int>(sv.size());
+}
+
+inline ROOT::VecOps::RVec<float>
+get_SV_x(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(sv.size());
+  for (auto &v : sv) out.push_back(v.position.x);
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_SV_y(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(sv.size());
+  for (auto &v : sv) out.push_back(v.position.y);
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_SV_z(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(sv.size());
+  for (auto &v : sv) out.push_back(v.position.z);
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_SV_chi2(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(sv.size());
+  for (auto &v : sv) out.push_back(v.chi2);
+  return out;
+}
+inline ROOT::VecOps::RVec<int>
+get_SV_ndf(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
+  ROOT::VecOps::RVec<int> out;
+  out.reserve(sv.size());
+  for (auto &v : sv) out.push_back(v.ndf);
+  return out;
+}
+// Number of constituent tracks: (particles_end - particles_begin).
+// Will be 0 on inputs where the converter didn't fill the relation.
+inline ROOT::VecOps::RVec<int>
+get_SV_ntrk(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
+  ROOT::VecOps::RVec<int> out;
+  out.reserve(sv.size());
+  for (auto &v : sv)
+    out.push_back(static_cast<int>(v.particles_end) -
+                  static_cast<int>(v.particles_begin));
+  return out;
+}
+
+// Distance from the (file-side) PV. axis: -1 = 3D, 0 = x, 1 = y, 2 = z.
+inline ROOT::VecOps::RVec<float>
+get_SV_d2PV(ROOT::VecOps::RVec<edm4hep::VertexData> sv, float PVx, float PVy,
+            float PVz, int axis = -1) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(sv.size());
+  for (auto &v : sv) {
+    const float dx = v.position.x - PVx;
+    const float dy = v.position.y - PVy;
+    const float dz = v.position.z - PVz;
+    if (axis == 0)
+      out.push_back(dx);
+    else if (axis == 1)
+      out.push_back(dy);
+    else if (axis == 2)
+      out.push_back(dz);
+    else
+      out.push_back(std::sqrt(dx * dx + dy * dy + dz * dz));
+  }
+  return out;
+}
+
+// In-detector quality flag: |SV-PV|_3D < max_mm AND |SV.z|<150 mm.
+// DELPHI's sv_reco occasionally produces extrapolation outliers at
+// O(1 m) — reject them with this flag before downstream cuts.
+inline ROOT::VecOps::RVec<int>
+get_SV_inDet(ROOT::VecOps::RVec<edm4hep::VertexData> sv, float PVx, float PVy,
+             float PVz, float max_d2PV_mm = 50.0f, float max_absz_mm = 150.0f) {
+  ROOT::VecOps::RVec<int> out;
+  out.reserve(sv.size());
+  for (auto &v : sv) {
+    const float dx = v.position.x - PVx;
+    const float dy = v.position.y - PVy;
+    const float dz = v.position.z - PVz;
+    const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const bool ok = (d < max_d2PV_mm) && (std::abs(v.position.z) < max_absz_mm);
+    out.push_back(ok ? 1 : 0);
+  }
+  return out;
 }
 
 } // namespace ZHfunctions
