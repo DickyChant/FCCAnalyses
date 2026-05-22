@@ -588,6 +588,99 @@ get_SV_inDet(ROOT::VecOps::RVec<edm4hep::VertexData> sv, float PVx, float PVy,
   return out;
 }
 
+// =================== Tagger-ready helpers ====================
+// Extract per-component float vectors from a Vec<TLorentzVector>.
+// `get_Vertex_p4` already gives us Vertex 4-momenta as TLorentzVectors built
+// by summing constituent RP 4-momenta — these are the cheapest way to expose
+// px/py/pz/e/phi/theta as flat per-Vertex columns the tagger expects.
+inline ROOT::VecOps::RVec<float>
+get_p4_px(ROOT::VecOps::RVec<TLorentzVector> p4) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(p4.size());
+  for (auto &v : p4) out.push_back(static_cast<float>(v.Px()));
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_p4_py(ROOT::VecOps::RVec<TLorentzVector> p4) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(p4.size());
+  for (auto &v : p4) out.push_back(static_cast<float>(v.Py()));
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_p4_pz(ROOT::VecOps::RVec<TLorentzVector> p4) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(p4.size());
+  for (auto &v : p4) out.push_back(static_cast<float>(v.Pz()));
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_p4_e(ROOT::VecOps::RVec<TLorentzVector> p4) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(p4.size());
+  for (auto &v : p4) out.push_back(static_cast<float>(v.E()));
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_p4_phi(ROOT::VecOps::RVec<TLorentzVector> p4) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(p4.size());
+  for (auto &v : p4) out.push_back(static_cast<float>(v.Phi()));
+  return out;
+}
+inline ROOT::VecOps::RVec<float>
+get_p4_theta(ROOT::VecOps::RVec<TLorentzVector> p4) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(p4.size());
+  for (auto &v : p4) out.push_back(static_cast<float>(v.Theta()));
+  return out;
+}
+
+// Per-RP lookup into a per-Vertex attribute via `RP_vert_ind`. Used to expose
+// `RP_vert_e` / `RP_vert_mass` (the energy / invariant mass of the vertex an
+// RP is assigned to). For RPs not assigned to any vertex (`RP_vert_ind < 0`)
+// the sentinel value is emitted instead.
+inline ROOT::VecOps::RVec<float>
+get_RP_vert_attr(ROOT::VecOps::RVec<int> rp_vert_ind,
+                 ROOT::VecOps::RVec<float> vertex_attr,
+                 float sentinel = -1.0f) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(rp_vert_ind.size());
+  for (int idx : rp_vert_ind) {
+    if (idx >= 0 && static_cast<size_t>(idx) < vertex_attr.size())
+      out.push_back(vertex_attr[idx]);
+    else
+      out.push_back(sentinel);
+  }
+  return out;
+}
+
+// Wrap (-π, π]. Used by `delta_phi`.
+inline float wrap_pi(double d) {
+  const double TWOPI = 2.0 * M_PI;
+  while (d > M_PI)   d -= TWOPI;
+  while (d <= -M_PI) d += TWOPI;
+  return static_cast<float>(d);
+}
+
+// φ delta to a scalar reference angle (e.g. EVT_thrust_phi), wrapped to (-π, π].
+inline ROOT::VecOps::RVec<float>
+delta_phi(ROOT::VecOps::RVec<float> phi, float ref) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(phi.size());
+  for (float p : phi) out.push_back(wrap_pi(static_cast<double>(p) - ref));
+  return out;
+}
+
+// θ delta to a scalar reference angle (e.g. EVT_thrust_theta).
+inline ROOT::VecOps::RVec<float>
+delta_theta(ROOT::VecOps::RVec<float> theta, float ref) {
+  ROOT::VecOps::RVec<float> out;
+  out.reserve(theta.size());
+  for (float t : theta) out.push_back(t - ref);
+  return out;
+}
+
 } // namespace ZHfunctions
 } // namespace FCCAnalyses
 

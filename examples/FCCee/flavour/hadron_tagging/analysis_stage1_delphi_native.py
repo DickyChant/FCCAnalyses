@@ -56,39 +56,92 @@ nCPUS = 4
 class RDFanalysis():
 
     def analysers(df):
+        # =====================================================================
+        # Schema detection: the post-beff550 converter writes FCC-native
+        # collection names (EFlowTrack / EFlowPhoton / EFlowNeutralHadron /
+        # ParticleID_dEdx) and dropped the per-track lvlock + MC-Reco
+        # association collections that the older zhangj samples carried.
+        # We branch the alias/stub block on schema; the rest of the
+        # analyzer (Defines / Filters / output) is shared.
+        #
+        # On new-schema files the MC-Reco link is gone, so per-RP truth
+        # features (RP_MCidx, RP_fromB*, Vertex_fromB*) come out as zero
+        # arrays. That's acceptable for tagger inference and for the
+        # parton-flavour retrain (channel-based labels, no per-RP truth).
+        # =====================================================================
+        cols = set(df.GetColumnNames())
+        new_schema = ('_EFlowTrack_trackStates' in cols
+                      and '_Tracks_trackStates' not in cols)
+
+        if new_schema:
+            df = (df
+                  # MCParticles / PandoraPFOs are named the same in both
+                  # schemas; only their downstream FCC-name aliases change.
+                  .Alias('Particle',               'MCParticles')
+                  .Alias('ReconstructedParticles', 'PandoraPFOs')
+
+                  # Track_lvlock dropped — stub to zeros so every PFO passes.
+                  .Define('Track_lvlock',
+                          'ROOT::VecOps::RVec<int>(EFlowTrack.size(), 0)')
+                  .Define('RP_passLvlock_input',
+                          'FCCAnalyses::ZHfunctions::lvlockPassMask('
+                          'PandoraPFOs, Track_lvlock)')
+
+                  # dN/dx moved into ParticleID_dEdx in the new schema.
+                  # Stub the *legacy* (Tracks_dNdx + _Tracks_dNdx_track)
+                  # names with empty vectors so the existing get_RP_dndx
+                  # call returns all-zero dN/dx vectors.
+                  .Define('EFlowTrack_dNdx',
+                          'ROOT::VecOps::RVec<edm4hep::Quantity>{}')
+                  .Define('_EFlowTrack_dNdx_track',
+                          'ROOT::VecOps::RVec<podio::ObjectID>{}')
+
+                  # MC-particle index relations — same field names in both.
+                  .Alias('Particle0', '_MCParticles_parents.index')
+                  .Alias('Particle1', '_MCParticles_daughters.index')
+
+                  # _MCRecoAssociations_{from,to} dropped — stub empty so
+                  # get_VertexObject / PID / getRP2MC_index get zero-length
+                  # association vectors. Downstream features that depend on
+                  # the link (RP_MCidx, RP_fromB*, Vertex_fromB*) come out
+                  # as zero arrays of the appropriate length.
+                  .Define('MCRecoAssociations0',
+                          'ROOT::VecOps::RVec<int>{}')
+                  .Define('MCRecoAssociations1',
+                          'ROOT::VecOps::RVec<int>{}')
+                  )
+        else:
+            df = (df
+                  #############################################
+                  ## Legacy DELPHI-native (zhangj) schema aliases.
+                  #############################################
+                  .Alias('Particle',                 'MCParticles')
+                  .Alias('_EFlowTrack_trackStates',  '_Tracks_trackStates')
+
+                  ## DELPHI-legacy track-quality cut: SKELANA `LVLOCK == 0`.
+                  ## See repo CLAUDE.md for the convention; the writer emits
+                  ## every PFO so the cut lives at the FCCAnalyser entry
+                  ## point and is exposed as RP_passLvlock_input (don't
+                  ## shrink the RP collection before vertexing — relations
+                  ## point into the original PandoraPFOs ordering).
+                  .Alias('ReconstructedParticles',   'PandoraPFOs')
+                  .Define('RP_passLvlock_input',
+                          'FCCAnalyses::ZHfunctions::lvlockPassMask('
+                          'PandoraPFOs, Track_lvlock)')
+                  .Alias('EFlowTrack_dNdx',          'Tracks_dNdx')
+                  .Alias('_EFlowTrack_dNdx_track',   '_Tracks_dNdx_track')
+
+                  #############################################
+                  ## Index-relation aliases (file-side branch names)
+                  #############################################
+                  .Alias('Particle0',           '_MCParticles_parents.index')
+                  .Alias('Particle1',           '_MCParticles_daughters.index')
+                  .Alias('MCRecoAssociations0', '_MCRecoAssociations_from.index')
+                  .Alias('MCRecoAssociations1', '_MCRecoAssociations_to.index')
+                  )
+
         df2 = (
             df
-            #############################################
-            ## Collection-name aliases: DELPHI-native -> FCC names used
-            ## throughout the FCCAnalyses helpers / Defines below.
-            #############################################
-            .Alias('Particle',                 'MCParticles')
-            .Alias('_EFlowTrack_trackStates',  '_Tracks_trackStates')
-
-            ## DELPHI-legacy track-quality cut: SKELANA `LVLOCK == 0`
-            ## (with -1 allowed as the legacy-no-info value). The writer
-            ## emits every PFO so the cut lives at the FCCAnalyser entry
-            ## point. IMPORTANT: do NOT shrink the RP collection before
-            ## vertexing — `MCRecoAssociations_to.index` from the writer
-            ## points into the ORIGINAL PandoraPFOs ordering, and the
-            ## `get_VertexObject` / `myUtils::PID` / `getRP2MC_index`
-            ## helpers will segfault if we re-index out from under those
-            ## relations. Instead, alias the unfiltered collection, expose
-            ## the lvlock-pass flag as a parallel mask, and use it as a
-            ## per-RP cut downstream (or as the BDT input cut later).
-            .Alias('ReconstructedParticles',   'PandoraPFOs')
-            .Define('RP_passLvlock_input',
-                    'FCCAnalyses::ZHfunctions::lvlockPassMask(PandoraPFOs, Track_lvlock)')
-            .Alias('EFlowTrack_dNdx',          'Tracks_dNdx')
-            .Alias('_EFlowTrack_dNdx_track',   '_Tracks_dNdx_track')
-
-            #############################################
-            ## Index-relation aliases (file-side branch names)
-            #############################################
-            .Alias('Particle0',           '_MCParticles_parents.index')
-            .Alias('Particle1',           '_MCParticles_daughters.index')
-            .Alias('MCRecoAssociations0', '_MCRecoAssociations_from.index')
-            .Alias('MCRecoAssociations1', '_MCRecoAssociations_to.index')
 
             #############################################
             ## MC bookkeeping
@@ -202,7 +255,14 @@ class RDFanalysis():
             #############################################
             ## PV bookkeeping
             #############################################
-            .Define('EVT_hasPV',      'FCCAnalyses::ZHfunctions::hasPV(VertexObject)')
+            ## hasPV(VertexObject) is the legacy fitter-based check; on
+            ## new-schema files the VertexObject ends up empty because the
+            ## MC-Reco associations were stubbed (the converter dropped
+            ## them), so we OR in the file-side PrimaryVertex test that
+            ## both schemas carry.
+            .Define('EVT_hasPV',
+                    'int(FCCAnalyses::ZHfunctions::hasPV(VertexObject) != 0 '
+                    '    || PrimaryVertex.position.x.size() > 0)')
             .Define('EVT_NtracksPV',  'float(myUtils::get_PV_ntracks(VertexObject))')
             .Define('EVT_NVertex',    'float(VertexObject.size())')
             .Filter('EVT_hasPV==1')
@@ -246,6 +306,21 @@ class RDFanalysis():
             .Define('Vertex_d2PVz',   'myUtils::get_Vertex_d2PV(VertexObject, 2)')
             .Define('Vertex_d2PVErr', 'myUtils::get_Vertex_d2PVError(VertexObject, -1)')
             .Define('Vertex_d2PVSig', 'Vertex_d2PV / Vertex_d2PVErr')
+
+            #############################################
+            ## Vertex 4-momentum from constituent RPs
+            ## (`VertexObject.reco_ind` is filled by `myUtils::get_VertexObject`).
+            ## Exposed as per-Vertex flat columns so downstream taggers can
+            ## consume Vertex_px/py/pz/e the same way as RP_px/py/pz/e.
+            #############################################
+            .Define('Vertex_p4',
+                    'FCCAnalyses::ZHfunctions::get_Vertex_p4(VertexObject, RecoPartPIDAtVertex)')
+            .Define('Vertex_px',    'FCCAnalyses::ZHfunctions::get_p4_px(Vertex_p4)')
+            .Define('Vertex_py',    'FCCAnalyses::ZHfunctions::get_p4_py(Vertex_p4)')
+            .Define('Vertex_pz',    'FCCAnalyses::ZHfunctions::get_p4_pz(Vertex_p4)')
+            .Define('Vertex_e',     'FCCAnalyses::ZHfunctions::get_p4_e(Vertex_p4)')
+            .Define('Vertex_phi',   'FCCAnalyses::ZHfunctions::get_p4_phi(Vertex_p4)')
+            .Define('Vertex_theta', 'FCCAnalyses::ZHfunctions::get_p4_theta(Vertex_p4)')
 
             #############################################
             ## Reco P kinematics + per-track helix params
@@ -344,6 +419,26 @@ class RDFanalysis():
                     'Algorithms::getAxisCosTheta(EVT_thrust, RP_px, RP_py, RP_pz)')
             .Define('EVT_thrust_phi',   'FCCAnalyses::ZHfunctions::getAxisPhi(EVT_thrust)')
             .Define('EVT_thrust_theta', 'FCCAnalyses::ZHfunctions::getAxisTheta(EVT_thrust)')
+
+            #############################################
+            ## Tagger-ready angular deltas + per-RP linked-vertex attrs.
+            ## Depends on EVT_thrust_{phi,theta} + Vertex_p4 + RP_vert_ind.
+            ## Δφ wrapped to (-π, π]; Δθ unwrapped (theta ∈ [0,π]).
+            ## Vertex_thrustangle = cos(angle between Vertex momentum and
+            ## thrust axis), parallel to RP_thrustangle.
+            ## RP_vert_{e,mass} = per-RP lookup of the assigned vertex's
+            ## energy/mass; -1 for RPs not assigned to any vertex.
+            #############################################
+            .Define('RP_Dphi',       'FCCAnalyses::ZHfunctions::delta_phi(RP_phi, EVT_thrust_phi)')
+            .Define('RP_Dtheta',     'FCCAnalyses::ZHfunctions::delta_theta(RP_theta, EVT_thrust_theta)')
+            .Define('Vertex_Dphi',   'FCCAnalyses::ZHfunctions::delta_phi(Vertex_phi, EVT_thrust_phi)')
+            .Define('Vertex_Dtheta', 'FCCAnalyses::ZHfunctions::delta_theta(Vertex_theta, EVT_thrust_theta)')
+            .Define('Vertex_thrustangle',
+                    'Algorithms::getAxisCosTheta(EVT_thrust, Vertex_px, Vertex_py, Vertex_pz)')
+            .Define('RP_vert_e',
+                    'FCCAnalyses::ZHfunctions::get_RP_vert_attr(RP_vert_ind, Vertex_e)')
+            .Define('RP_vert_mass',
+                    'FCCAnalyses::ZHfunctions::get_RP_vert_attr(RP_vert_ind, Vertex_mass)')
 
             .Define('EVT_thrusthemis0_n', 'Algorithms::getAxisN(0)(RP_thrustangle, RP_charge)')
             .Define('EVT_thrusthemis1_n', 'Algorithms::getAxisN(1)(RP_thrustangle, RP_charge)')
@@ -498,9 +593,10 @@ class RDFanalysis():
 
             'recoEmiss_px', 'recoEmiss_py', 'recoEmiss_pz', 'recoEmiss_e',
 
-            'RP_n', 'RP_e', 'RP_m_reco',
+            'RP_n', 'RP_e', 'RP_m_true', 'RP_m_reco',
             'RP_px', 'RP_py', 'RP_pz', 'RP_phi', 'RP_theta', 'RP_charge',
-            'RP_thrustangle', 'RP_fromPV', 'RP_vert_ind',
+            'RP_thrustangle', 'RP_Dphi', 'RP_Dtheta',
+            'RP_fromPV', 'RP_vert_ind', 'RP_vert_e', 'RP_vert_mass',
             'RP_trk_d0', 'RP_trk_z0', 'RP_trk_phi', 'RP_trk_omega', 'RP_trk_tanLambda',
             'RP_dndx', 'RP_isMu', 'RP_isEl', 'RP_hasRich', 'RP_lvlock', 'RP_passLvlock',
             'RP_nMC', 'RP_MCidx',
@@ -510,6 +606,9 @@ class RDFanalysis():
             'Vertex_n', 'Vertex_x', 'Vertex_y', 'Vertex_z',
             'Vertex_xErr', 'Vertex_yErr', 'Vertex_zErr', 'Vertex_chi2',
             'Vertex_isPV', 'Vertex_ntrk', 'Vertex_mass',
+            'Vertex_px', 'Vertex_py', 'Vertex_pz', 'Vertex_e',
+            'Vertex_phi', 'Vertex_theta',
+            'Vertex_Dphi', 'Vertex_Dtheta', 'Vertex_thrustangle',
             'Vertex_d2PV', 'Vertex_d2PVx', 'Vertex_d2PVy', 'Vertex_d2PVz',
             'Vertex_d2PVErr', 'Vertex_d2PVSig',
             'Vertex_fromBs', 'Vertex_fromBu', 'Vertex_fromBd', 'Vertex_fromBc', 'Vertex_fromLb',
