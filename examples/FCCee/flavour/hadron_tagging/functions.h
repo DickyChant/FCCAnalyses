@@ -233,8 +233,8 @@ struct get_RP_isDescendantAny {
       const auto &p = in[i];
       bool match = false;
       for (int q : m_pdgs) {
-        const bool m = m_chargeconjugate ? (std::abs(p.PDG) == std::abs(q))
-                                         : (p.PDG == q);
+        const bool m =
+            m_chargeconjugate ? (std::abs(p.PDG) == std::abs(q)) : (p.PDG == q);
         if (m) {
           match = true;
           break;
@@ -349,8 +349,8 @@ inline Vec_rp filterRPbyLvlock(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
 // 1 = keep (lvlock == 0 or -1), 0 = drop. Same semantics as
 // `filterRPbyLvlock` but as a mask — preserves the original RP indexing
 // so MCRecoAssociations / Vertex helpers stay valid.
-inline ROOT::VecOps::RVec<int>
-lvlockPassMask(Vec_rp rp, ROOT::VecOps::RVec<int> lvlock) {
+inline ROOT::VecOps::RVec<int> lvlockPassMask(Vec_rp rp,
+                                              ROOT::VecOps::RVec<int> lvlock) {
   ROOT::VecOps::RVec<int> out;
   out.reserve(rp.size());
   for (size_t i = 0; i < rp.size(); ++i) {
@@ -504,35 +504,40 @@ inline ROOT::VecOps::RVec<float>
 get_SV_x(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(sv.size());
-  for (auto &v : sv) out.push_back(v.position.x);
+  for (auto &v : sv)
+    out.push_back(v.position.x);
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_SV_y(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(sv.size());
-  for (auto &v : sv) out.push_back(v.position.y);
+  for (auto &v : sv)
+    out.push_back(v.position.y);
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_SV_z(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(sv.size());
-  for (auto &v : sv) out.push_back(v.position.z);
+  for (auto &v : sv)
+    out.push_back(v.position.z);
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_SV_chi2(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(sv.size());
-  for (auto &v : sv) out.push_back(v.chi2);
+  for (auto &v : sv)
+    out.push_back(v.chi2);
   return out;
 }
 inline ROOT::VecOps::RVec<int>
 get_SV_ndf(ROOT::VecOps::RVec<edm4hep::VertexData> sv) {
   ROOT::VecOps::RVec<int> out;
   out.reserve(sv.size());
-  for (auto &v : sv) out.push_back(v.ndf);
+  for (auto &v : sv)
+    out.push_back(v.ndf);
   return out;
 }
 // Number of constituent tracks: (particles_end - particles_begin).
@@ -597,42 +602,48 @@ inline ROOT::VecOps::RVec<float>
 get_p4_px(ROOT::VecOps::RVec<TLorentzVector> p4) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(p4.size());
-  for (auto &v : p4) out.push_back(static_cast<float>(v.Px()));
+  for (auto &v : p4)
+    out.push_back(static_cast<float>(v.Px()));
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_p4_py(ROOT::VecOps::RVec<TLorentzVector> p4) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(p4.size());
-  for (auto &v : p4) out.push_back(static_cast<float>(v.Py()));
+  for (auto &v : p4)
+    out.push_back(static_cast<float>(v.Py()));
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_p4_pz(ROOT::VecOps::RVec<TLorentzVector> p4) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(p4.size());
-  for (auto &v : p4) out.push_back(static_cast<float>(v.Pz()));
+  for (auto &v : p4)
+    out.push_back(static_cast<float>(v.Pz()));
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_p4_e(ROOT::VecOps::RVec<TLorentzVector> p4) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(p4.size());
-  for (auto &v : p4) out.push_back(static_cast<float>(v.E()));
+  for (auto &v : p4)
+    out.push_back(static_cast<float>(v.E()));
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_p4_phi(ROOT::VecOps::RVec<TLorentzVector> p4) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(p4.size());
-  for (auto &v : p4) out.push_back(static_cast<float>(v.Phi()));
+  for (auto &v : p4)
+    out.push_back(static_cast<float>(v.Phi()));
   return out;
 }
 inline ROOT::VecOps::RVec<float>
 get_p4_theta(ROOT::VecOps::RVec<TLorentzVector> p4) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(p4.size());
-  for (auto &v : p4) out.push_back(static_cast<float>(v.Theta()));
+  for (auto &v : p4)
+    out.push_back(static_cast<float>(v.Theta()));
   return out;
 }
 
@@ -658,26 +669,31 @@ get_RP_vert_attr(ROOT::VecOps::RVec<int> rp_vert_ind,
 // Wrap (-π, π]. Used by `delta_phi`.
 inline float wrap_pi(double d) {
   const double TWOPI = 2.0 * M_PI;
-  while (d > M_PI)   d -= TWOPI;
-  while (d <= -M_PI) d += TWOPI;
+  while (d > M_PI)
+    d -= TWOPI;
+  while (d <= -M_PI)
+    d += TWOPI;
   return static_cast<float>(d);
 }
 
-// φ delta to a scalar reference angle (e.g. EVT_thrust_phi), wrapped to (-π, π].
-inline ROOT::VecOps::RVec<float>
-delta_phi(ROOT::VecOps::RVec<float> phi, float ref) {
+// φ delta to a scalar reference angle (e.g. EVT_thrust_phi), wrapped to (-π,
+// π].
+inline ROOT::VecOps::RVec<float> delta_phi(ROOT::VecOps::RVec<float> phi,
+                                           float ref) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(phi.size());
-  for (float p : phi) out.push_back(wrap_pi(static_cast<double>(p) - ref));
+  for (float p : phi)
+    out.push_back(wrap_pi(static_cast<double>(p) - ref));
   return out;
 }
 
 // θ delta to a scalar reference angle (e.g. EVT_thrust_theta).
-inline ROOT::VecOps::RVec<float>
-delta_theta(ROOT::VecOps::RVec<float> theta, float ref) {
+inline ROOT::VecOps::RVec<float> delta_theta(ROOT::VecOps::RVec<float> theta,
+                                             float ref) {
   ROOT::VecOps::RVec<float> out;
   out.reserve(theta.size());
-  for (float t : theta) out.push_back(t - ref);
+  for (float t : theta)
+    out.push_back(t - ref);
   return out;
 }
 
