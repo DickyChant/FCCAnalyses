@@ -48,17 +48,30 @@ def main():
     n = ev.num_entries
     print(f"EDM4hep: {n} events", flush=True)
 
+    # Collection-name auto-detect: the legacy
+    # delphi-improved-reco/ild/delphi_to_edm4hep --fcc-names writer ships
+    # Particle / ReconstructedParticles; the post-beff550 direct converter
+    # (delphi_sdst_to_edm4hep) ships MCParticles / PandoraPFOs without
+    # the --fcc-names rename. Try both.
+    avail = set(ev.keys())
+    rp_name = ("ReconstructedParticles"
+               if "ReconstructedParticles/ReconstructedParticles.charge" in avail
+               else "PandoraPFOs")
+    mc_name = ("Particle"
+               if "Particle/Particle.PDG" in avail else "MCParticles")
+    print(f"  collections: reco={rp_name}, mc={mc_name}", flush=True)
+
     # Reco
-    rp_px = ev["ReconstructedParticles/ReconstructedParticles.momentum.x"].array()
-    rp_py = ev["ReconstructedParticles/ReconstructedParticles.momentum.y"].array()
-    rp_pz = ev["ReconstructedParticles/ReconstructedParticles.momentum.z"].array()
-    rp_q = ev["ReconstructedParticles/ReconstructedParticles.charge"].array()
+    rp_px = ev[f"{rp_name}/{rp_name}.momentum.x"].array()
+    rp_py = ev[f"{rp_name}/{rp_name}.momentum.y"].array()
+    rp_pz = ev[f"{rp_name}/{rp_name}.momentum.z"].array()
+    rp_q  = ev[f"{rp_name}/{rp_name}.charge"].array()
     # Gen
-    mc_st = ev["Particle/Particle.generatorStatus"].array()
-    mc_pdg = ev["Particle/Particle.PDG"].array()
-    mc_px = ev["Particle/Particle.momentum.x"].array()
-    mc_py = ev["Particle/Particle.momentum.y"].array()
-    mc_pz = ev["Particle/Particle.momentum.z"].array()
+    mc_st  = ev[f"{mc_name}/{mc_name}.generatorStatus"].array()
+    mc_pdg = ev[f"{mc_name}/{mc_name}.PDG"].array()
+    mc_px  = ev[f"{mc_name}/{mc_name}.momentum.x"].array()
+    mc_py  = ev[f"{mc_name}/{mc_name}.momentum.y"].array()
+    mc_pz  = ev[f"{mc_name}/{mc_name}.momentum.z"].array()
     # Run / event keys live in podio's GenericParameter int map
     gp_keys = ev["GPIntKeys"].array()
     gp_vals = ev["GPIntValues"].array()
