@@ -247,10 +247,29 @@ class RDFanalysis():
             .Define('MC_PV_xyzt',     'FCCAnalyses::ZHfunctions::get_MC_PV_status1(Particle)')
 
             #############################################
-            ## RECO vertex object
+            ## RECO vertex object — schema-conditional.
+            ##  Legacy:  refit via myUtils::get_VertexObject (uses MC-Reco
+            ##           link to label vertices).
+            ##  New:     build RVec<FCCAnalysesVertex> directly from
+            ##           file-side PrimaryVertex + SecondaryVertices via
+            ##           ZHfunctions::buildFCCAnalysesVertexFromFileSide.
+            ##           No refit, no MC-Reco needed; the converter already
+            ##           wrote fitted positions, chi2, and the particles
+            ##           relation (_*_particles -> PandoraPFOs).
+            ##           Also fills the fitter-output RVec fields (track
+            ##           momentum/parameters/phase/chi2) sized to reco_ind
+            ##           so myUtils::get_RP_atVertex's `.at(i)` loops
+            ##           don't go out of range.
             #############################################
             .Define('VertexObject',
-                    'myUtils::get_VertexObject(MCVertexObject, ReconstructedParticles, _EFlowTrack_trackStates, MCRecoAssociations0, MCRecoAssociations1)')
+                    ('FCCAnalyses::ZHfunctions::buildFCCAnalysesVertexFromFileSide('
+                     'PrimaryVertex, SecondaryVertices, '
+                     '_PrimaryVertex_particles, _SecondaryVertices_particles, '
+                     'ReconstructedParticles)'
+                     if new_schema else
+                     'myUtils::get_VertexObject(MCVertexObject, '
+                     'ReconstructedParticles, _EFlowTrack_trackStates, '
+                     'MCRecoAssociations0, MCRecoAssociations1)'))
 
             #############################################
             ## PV bookkeeping

@@ -17,15 +17,19 @@
 
 #include "FCCAnalyses/MCParticle.h"
 #include "FCCAnalyses/ReconstructedParticle2MC.h"
+#include "FCCAnalyses/VertexingUtils.h"
 #include "FCCAnalyses/myUtils.h"
 #include "ROOT/RVec.hxx"
 #include "TLorentzVector.h"
+#include "TVector3.h"
+#include "TVectorD.h"
 #include "edm4hep/MCParticleData.h"
 #include "edm4hep/RecDqdxData.h"
 #include "edm4hep/ReconstructedParticleData.h"
 #include "edm4hep/TrackData.h"
 #include "edm4hep/TrackState.h"
 #include "edm4hep/VertexData.h"
+#include "podio/ObjectID.h"
 
 namespace FCCAnalyses {
 namespace ZHfunctions {
@@ -695,6 +699,92 @@ inline ROOT::VecOps::RVec<float> delta_theta(ROOT::VecOps::RVec<float> theta,
   for (float t : theta)
     out.push_back(t - ref);
   return out;
+}
+
+// Build a VertexObject (RVec<FCCAnalysesVertex>) directly from file-side
+// PrimaryVertex + SecondaryVertices on post-beff550 EDM4hep — bypasses
+// myUtils::get_VertexObject which requires MC-Reco associations that the
+// new converter dropped. The fitter inside get_VertexObject re-fits
+// vertices from reco tracks AND uses MC-Reco to *label* them; we don't
+// need either step because the converter already wrote the fitted PV and
+// SVs. Mapping:
+//
+//   FCCAnalysesVertex.vertex     <- edm4hep::VertexData (copy)
+//   FCCAnalysesVertex.ntracks    <- (particles_end - particles_begin)
+//   FCCAnalysesVertex.reco_ind   <- indices into PandoraPFOs from
+//                                   _PrimaryVertex_particles /
+//                                   _SecondaryVertices_particles
+//   FCCAnalysesVertex.mc_ind     <- -1 (no MC truth on new schema)
+//
+//   The fitter-output RVecs (updated_track_momentum_at_vertex,
+//   updated_track_parameters, final_track_phases, reco_chi2) MUST be
+//   sized equal to reco_ind — myUtils::get_RP_atVertex (and friends)
+//   loop `for i in [0, reco_ind.size())` and do `.at(i)` on these
+//   fields, so an empty RVec there triggers a bounds-checked crash.
+//   We fill them with sensible defaults:
+//     - updated_track_momentum_at_vertex[i] = TVector3(PFO_i px,py,pz)
+//       (no refit; file-side PFO momentum is the post-fit value)
+//     - updated_track_parameters[i] = TVectorD(5, zeros)   (sentinel; only
+//                                     line 1412/1423 of myUtils.cc read
+//                                     [0]/[3] for d0/z0 — those reads
+//                                     belong to RP_d0_atVertex code that
+//                                     we don't need for the tagger)
+//     - final_track_phases[i] = 0
+//     - reco_chi2[i] = 0
+//
+// PV goes first (so VertexObject[0] == PV, matches the convention the
+// legacy fitter uses and what get_Vertex_isPV expects).
+inline ROOT::VecOps::RVec<VertexingUtils::FCCAnalysesVertex>
+buildFCCAnalysesVertexFromFileSide(
+    ROOT::VecOps::RVec<edm4hep::VertexData> primaryVertex,
+    ROOT::VecOps::RVec<edm4hep::VertexData> secondaryVertices,
+    ROOT::VecOps::RVec<podio::ObjectID> primaryVertexParticles,
+    ROOT::VecOps::RVec<podio::ObjectID> secondaryVerticesParticles,
+    ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData> reco) {
+
+  ROOT::VecOps::RVec<VertexingUtils::FCCAnalysesVertex> result;
+
+  auto fill = [&](const edm4hep::VertexData &vd,
+                  const ROOT::VecOps::RVec<podio::ObjectID> &rel,
+                  bool is_pv) {
+    VertexingUtils::FCCAnalysesVertex v;
+    v.vertex = vd;
+    // ZHfunctions::get_Vertex_isPV flags entries with mc_ind == 0 as the
+    // primary vertex. Tag PVs accordingly so Vertex_isPV downstream is
+    // [1, 0, 0, ...] (PV first, then SVs).
+    v.mc_ind = is_pv ? 0 : -1;
+
+    const int beg = vd.particles_begin;
+    const int end = vd.particles_end;
+    for (int k = beg; k < end && k < static_cast<int>(rel.size()); ++k) {
+      const int pfo_idx = rel[k].index;
+      v.reco_ind.push_back(pfo_idx);
+
+      // updated_track_momentum_at_vertex[i] = PFO_i momentum (no refit)
+      if (pfo_idx >= 0 && pfo_idx < static_cast<int>(reco.size())) {
+        const auto &m = reco[pfo_idx].momentum;
+        v.updated_track_momentum_at_vertex.emplace_back(m.x, m.y, m.z);
+      } else {
+        v.updated_track_momentum_at_vertex.emplace_back(0.f, 0.f, 0.f);
+      }
+
+      // Sentinel-sized fitter outputs so .at(i) loops in myUtils.cc
+      // (d0/z0 / chi2 / phase reads) don't go out of range. Values are
+      // unused by the parton-flavour / B-hadron tagger pipeline.
+      v.updated_track_parameters.emplace_back(5);  // TVectorD(5) zeros
+      v.final_track_phases.push_back(0.f);
+      v.reco_chi2.push_back(0.f);
+    }
+    v.ntracks = static_cast<int>(v.reco_ind.size());
+    result.push_back(v);
+  };
+
+  for (const auto &vd : primaryVertex)
+    fill(vd, primaryVertexParticles, /*is_pv=*/true);
+  for (const auto &vd : secondaryVertices)
+    fill(vd, secondaryVerticesParticles, /*is_pv=*/false);
+
+  return result;
 }
 
 } // namespace ZHfunctions
