@@ -781,11 +781,280 @@ buildFCCAnalysesVertexFromFileSide(
 
   for (const auto &vd : primaryVertex)
     fill(vd, primaryVertexParticles, /*is_pv=*/true);
-  for (const auto &vd : secondaryVertices)
+
+  // Outer-envelope drop only: |d2PV| < 1000 mm AND |z| < 500 mm. This
+  // removes pair-seed extrapolation outliers / beam-pipe + cryostat
+  // interactions but KEEPS V0 candidates (K0_S, Λ) that the model needs
+  // for strangeness / baryon tagging. The per-vertex isInDet / isV0
+  // flags below let the model distinguish "B/D-like SV" from
+  // "V0-like SV" — same expose-don't-cut principle as RP_passLvlock.
+  const float MAX_D2PV_MM = 1000.0f;
+  const float MAX_ABSZ_MM = 500.0f;
+  float pvx = 0.f, pvy = 0.f, pvz = 0.f;
+  if (!primaryVertex.empty()) {
+    pvx = primaryVertex[0].position.x;
+    pvy = primaryVertex[0].position.y;
+    pvz = primaryVertex[0].position.z;
+  }
+  for (const auto &vd : secondaryVertices) {
+    const float dx = vd.position.x - pvx;
+    const float dy = vd.position.y - pvy;
+    const float dz = vd.position.z - pvz;
+    const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (d >= MAX_D2PV_MM) continue;            // genuine beam-pipe / pair-seed junk
+    if (std::abs(vd.position.z) >= MAX_ABSZ_MM) continue;
     fill(vd, secondaryVerticesParticles, /*is_pv=*/false);
+  }
 
   return result;
 }
+
+
+// Per-vertex inDet flag (|d2PV|<50mm AND |z|<150mm), analogous to
+// RP_passLvlock. Exposed as a feature, NOT used to filter the
+// VertexObject collection.
+inline ROOT::VecOps::RVec<int>
+get_Vertex_isInDet(
+    ROOT::VecOps::RVec<VertexingUtils::FCCAnalysesVertex> vobj,
+    float max_d2PV_mm = 50.0f, float max_absz_mm = 150.0f) {
+  ROOT::VecOps::RVec<int> out;
+  out.reserve(vobj.size());
+  if (vobj.empty()) return out;
+  const auto &pv = vobj[0].vertex.position;
+  for (auto &v : vobj) {
+    const float dx = v.vertex.position.x - pv.x;
+    const float dy = v.vertex.position.y - pv.y;
+    const float dz = v.vertex.position.z - pv.z;
+    const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const bool inDet = (d < max_d2PV_mm) &&
+                       (std::abs(v.vertex.position.z) < max_absz_mm);
+    out.push_back(inDet ? 1 : 0);
+  }
+  return out;
+}
+
+
+// Per-vertex V0 candidate flag. A V0 (K0_S → π+π− or Λ → pπ−) is
+// characterised by:
+//   - displaced position (typical K0_S γcτ ~ 13 cm, Λ γcτ ~ 30 cm at LEP1)
+//   - exactly 2 charged daughters
+//   - invariant mass near m_K0S (497 MeV) or m_Lambda (1115 MeV)
+// We flag any 2-track SV whose mass falls in the K0_S or Λ window. Both
+// flags can be true simultaneously near the overlap region; downstream
+// the model can use them as soft tags.
+inline ROOT::VecOps::RVec<int>
+get_Vertex_isV0(
+    ROOT::VecOps::RVec<VertexingUtils::FCCAnalysesVertex> vobj,
+    ROOT::VecOps::RVec<float> v_mass) {
+  ROOT::VecOps::RVec<int> out;
+  out.reserve(vobj.size());
+  for (size_t i = 0; i < vobj.size(); ++i) {
+    // PV first, V0s never have isPV=1
+    if (vobj[i].mc_ind == 0) { out.push_back(0); continue; }
+    if (vobj[i].ntracks != 2) { out.push_back(0); continue; }
+    if (i >= v_mass.size())   { out.push_back(0); continue; }
+    const float m = v_mass[i];
+    // Loose K0_S mass window (442–552 MeV, ±2σ for DELPHI resolution)
+    const bool isKs = (m > 0.442f && m < 0.552f);
+    // Loose Λ mass window (1.103–1.127 MeV)
+    const bool isLm = (m > 1.103f && m < 1.127f);
+    out.push_back((isKs || isLm) ? 1 : 0);
+  }
+  return out;
+}
+
+
+// ============================================================================
+// Angle-based RP -> MCParticle matcher.
+//
+// The new-schema EDM4hep production (delphi_sdst_to_edm4hep) doesn't write
+// MCRecoAssociations, so the canonical helper getRP2MC_index returns all -1
+// and RP_fromB* / Vertex_fromB* downstream come out as zero arrays. This
+// helper reconstructs the link by matching every reco PFO to its closest
+// stable MC particle in (eta, phi) with a loose |p| consistency cut. It is
+// roughly equivalent to what an MC-truth-table emitting converter would
+// produce, accurate enough for per-RP truth-PDG queries and per-hemisphere
+// truth label assignment.
+//
+// Convention: return value is a per-RP index into MCParticles (i.e. into
+// the `mc` argument); -1 means "no good match". This matches the signature
+// the rest of the pipeline expects from RP_MCidx and lets get_RP_isDescendant
+// / get_RP_isDescendantAny work unchanged.
+inline ROOT::VecOps::RVec<int>
+matchRPtoMCByAngle(
+    ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData> reco,
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> mc,
+    double dR_max = 0.02,
+    double p_rel_tol = 0.20) {
+  ROOT::VecOps::RVec<int> out(reco.size(), -1);
+  std::vector<char> taken(mc.size(), 0);
+
+  // Pre-compute MC angles & momenta for stable (status==1) particles only.
+  std::vector<int>    cand_idx;
+  std::vector<double> cand_theta, cand_phi, cand_p;
+  cand_idx.reserve(mc.size());
+  cand_theta.reserve(mc.size());
+  cand_phi.reserve(mc.size());
+  cand_p.reserve(mc.size());
+  for (size_t j = 0; j < mc.size(); ++j) {
+    const auto &m = mc[j];
+    if (m.generatorStatus != 1) continue;
+    double pp = std::sqrt(m.momentum.x * m.momentum.x +
+                          m.momentum.y * m.momentum.y +
+                          m.momentum.z * m.momentum.z);
+    if (pp <= 0.) continue;
+    cand_idx.push_back(static_cast<int>(j));
+    cand_theta.push_back(std::acos(m.momentum.z / pp));
+    cand_phi.push_back(std::atan2(m.momentum.y, m.momentum.x));
+    cand_p.push_back(pp);
+  }
+
+  for (size_t i = 0; i < reco.size(); ++i) {
+    const auto &r = reco[i];
+    double rp = std::sqrt(r.momentum.x * r.momentum.x +
+                          r.momentum.y * r.momentum.y +
+                          r.momentum.z * r.momentum.z);
+    if (rp <= 0.) continue;
+    double r_theta = std::acos(r.momentum.z / rp);
+    double r_phi   = std::atan2(r.momentum.y, r.momentum.x);
+
+    int best_k = -1;
+    double best_score = dR_max * dR_max;   // squared dR threshold
+    for (size_t k = 0; k < cand_idx.size(); ++k) {
+      if (taken[cand_idx[k]]) continue;
+      // Loose momentum consistency to avoid pathological 30 GeV photon →
+      // 0.4 GeV pion matches that would otherwise pass dR.
+      if (std::abs(rp - cand_p[k]) / cand_p[k] > p_rel_tol) continue;
+      double dphi = cand_phi[k] - r_phi;
+      while (dphi >  M_PI) dphi -= 2 * M_PI;
+      while (dphi < -M_PI) dphi += 2 * M_PI;
+      double dtheta = cand_theta[k] - r_theta;
+      double dr2 = dtheta * dtheta + dphi * dphi;
+      if (dr2 < best_score) {
+        best_score = dr2;
+        best_k = static_cast<int>(k);
+      }
+    }
+    if (best_k >= 0) {
+      out[i] = cand_idx[best_k];
+      taken[cand_idx[best_k]] = 1;
+    }
+  }
+  return out;
+}
+
+
+// Per-RP truth PDG, given the angle-matched index from matchRPtoMCByAngle.
+// Returns 0 for unmatched RPs (sentinel different from any real PDG).
+inline ROOT::VecOps::RVec<int>
+getRPMatchedPDG(
+    ROOT::VecOps::RVec<int> matchIdx,
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> mc) {
+  ROOT::VecOps::RVec<int> out(matchIdx.size(), 0);
+  for (size_t i = 0; i < matchIdx.size(); ++i) {
+    int j = matchIdx[i];
+    if (j >= 0 && j < static_cast<int>(mc.size())) out[i] = mc[j].PDG;
+  }
+  return out;
+}
+
+
+// Per-RP value pulled from any ParticleID_* collection in the new schema.
+// EDM4hep PID layout: each ParticleIDData has [parameters_begin,
+// parameters_end] indices into a flat float vector
+// `_ParticleID_<name>_parameters`. The link from PID -> RP is via the
+// OneToOne `particle` relation stored as a parallel ObjectID collection
+// `_ParticleID_<name>_particle.index` (per-event integer RVec).
+//
+// This is a single generic helper: pick `param_index` (offset within each
+// PID's parameter slice) and the function returns the per-RP RVec of that
+// parameter value, with 0.0 for RPs that have no PID attached. We use:
+//   * dEdx (2 params/PID): param_index=0 -> dEdx value, 1 -> sigma
+//   * HadronRich (18 params/PID): param_index 0..17 for individual tags
+inline ROOT::VecOps::RVec<float>
+getRPPIDParam(
+    ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData> reco,
+    ROOT::VecOps::RVec<edm4hep::ParticleIDData> pids,
+    ROOT::VecOps::RVec<float> pid_params_flat,
+    ROOT::VecOps::RVec<int> pid_particle_idx,
+    int param_index = 0) {
+  ROOT::VecOps::RVec<float> out(reco.size(), 0.f);
+  const int n_pids = static_cast<int>(pids.size());
+  const int n_reco = static_cast<int>(reco.size());
+  const int n_link = static_cast<int>(pid_particle_idx.size());
+  const int n_flat = static_cast<int>(pid_params_flat.size());
+  for (int i = 0; i < n_pids; ++i) {
+    int rp_idx = (i < n_link) ? pid_particle_idx[i] : -1;
+    if (rp_idx < 0 || rp_idx >= n_reco) continue;
+    int b = pids[i].parameters_begin + param_index;
+    int e = pids[i].parameters_end;
+    if (b >= 0 && b < n_flat && b < e) {
+      out[rp_idx] = pid_params_flat[b];
+    }
+  }
+  return out;
+}
+
+
+// Per-hemisphere truth label assignment using gen-level B-hadrons.
+//
+// Given per-event RVecs of (px, py, pz) for each gen-B species
+// (genBd, genBu, genBs, genBc, genLb) plus the event's thrust unit
+// vector (computed from EVT_thrust_theta / EVT_thrust_phi), return a
+// per-event integer "hemisphereLabelMask" of length 2 with:
+//
+//   index 0 = Emin side (thrust_angle > 0): which B species sits here
+//   index 1 = Emax side (thrust_angle < 0): same
+//
+// Encoding: 0=none, 1=Bd, 2=Bu, 3=Bs, 4=has1Bc, 5=Lb
+//
+// Use case: prep_bhadron.py reads this and overrides the channel-based
+// label with the per-hemisphere true content.
+inline std::vector<int>
+classifyHemispheresByGenB(
+    float thrust_theta, float thrust_phi,
+    ROOT::VecOps::RVec<float> Bd_px, ROOT::VecOps::RVec<float> Bd_py, ROOT::VecOps::RVec<float> Bd_pz,
+    ROOT::VecOps::RVec<float> Bu_px, ROOT::VecOps::RVec<float> Bu_py, ROOT::VecOps::RVec<float> Bu_pz,
+    ROOT::VecOps::RVec<float> Bs_px, ROOT::VecOps::RVec<float> Bs_py, ROOT::VecOps::RVec<float> Bs_pz,
+    ROOT::VecOps::RVec<float> Bc_px, ROOT::VecOps::RVec<float> Bc_py, ROOT::VecOps::RVec<float> Bc_pz,
+    ROOT::VecOps::RVec<float> Lb_px, ROOT::VecOps::RVec<float> Lb_py, ROOT::VecOps::RVec<float> Lb_pz) {
+  // Thrust axis unit vector.
+  const double tx = std::sin(thrust_theta) * std::cos(thrust_phi);
+  const double ty = std::sin(thrust_theta) * std::sin(thrust_phi);
+  const double tz = std::cos(thrust_theta);
+
+  // For each side, find dominant B species (count of gen-particles in that
+  // hemisphere); ties broken by Bd<Bu<Bs<Bc<Lb declaration order.
+  int n_emin[6] = {0, 0, 0, 0, 0, 0};
+  int n_emax[6] = {0, 0, 0, 0, 0, 0};
+  auto fold = [&](const ROOT::VecOps::RVec<float> &px,
+                  const ROOT::VecOps::RVec<float> &py,
+                  const ROOT::VecOps::RVec<float> &pz,
+                  int species) {
+    for (size_t i = 0; i < px.size(); ++i) {
+      double dot = tx * px[i] + ty * py[i] + tz * pz[i];
+      if (dot > 0) n_emin[species]++; else n_emax[species]++;
+    }
+  };
+  fold(Bd_px, Bd_py, Bd_pz, 1);
+  fold(Bu_px, Bu_py, Bu_pz, 2);
+  fold(Bs_px, Bs_py, Bs_pz, 3);
+  fold(Bc_px, Bc_py, Bc_pz, 4);
+  fold(Lb_px, Lb_py, Lb_pz, 5);
+
+  auto pick = [](const int *cnt) {
+    int best = 0, best_n = 0;
+    for (int k = 1; k <= 5; ++k) {
+      if (cnt[k] > best_n) {
+        best_n = cnt[k];
+        best = k;
+      }
+    }
+    return best;
+  };
+  return std::vector<int>{pick(n_emin), pick(n_emax)};
+}
+
 
 } // namespace ZHfunctions
 } // namespace FCCAnalyses

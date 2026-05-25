@@ -315,9 +315,19 @@ class RDFanalysis():
             .Define('Vertex_zErr',    'myUtils::get_Vertex_zErr(VertexObject)')
             .Define('Vertex_chi2',    'myUtils::get_Vertex_chi2(VertexObject)')
             .Define('Vertex_isPV',    'FCCAnalyses::ZHfunctions::get_Vertex_isPV(VertexObject)')
+            # Per-vertex quality flags (expose-don't-cut, same pattern as
+            # RP_passLvlock). isInDet=1 means the SV sits inside the
+            # b/c-decay envelope (|d2PV|<50mm, |z|<150mm) — that's
+            # where genuine heavy-flavor SVs live. isV0=1 means the
+            # 2-track SV has K0_S or Λ-consistent mass — strangeness /
+            # baryon signature. Both feed the model as soft features.
+            .Define('Vertex_isInDet',
+                    'FCCAnalyses::ZHfunctions::get_Vertex_isInDet(VertexObject, 50.0, 150.0)')
             .Define('Vertex_ntrk',    'myUtils::get_Vertex_ntracks(VertexObject)')
             .Define('Vertex_n',       'int(Vertex_x.size())')
             .Define('Vertex_mass',    'myUtils::get_Vertex_mass(VertexObject, RecoPartPIDAtVertex)')
+            .Define('Vertex_isV0',
+                    'FCCAnalyses::ZHfunctions::get_Vertex_isV0(VertexObject, Vertex_mass)')
 
             .Define('Vertex_d2PV',    'myUtils::get_Vertex_d2PV(VertexObject, -1)')
             .Define('Vertex_d2PVx',   'myUtils::get_Vertex_d2PV(VertexObject, 0)')
@@ -403,7 +413,91 @@ class RDFanalysis():
                     'FCCAnalyses::ZHfunctions::permuteIntOnRP(ReconstructedParticles, RecoPartPIDAtVertex, RP_passLvlock_input)')
 
             .Define('RP_nMC',     'FCCAnalyses::ZHfunctions::getRP2MC_nMC(MCRecoAssociations0, MCRecoAssociations1, RecoPartPIDAtVertex)')
-            .Define('RP_MCidx',   'ReconstructedParticle2MC::getRP2MC_index(MCRecoAssociations0, MCRecoAssociations1, RecoPartPIDAtVertex)')
+            # RP_MCidx: index into MCParticles per RP. The legacy
+            # ReconstructedParticle2MC::getRP2MC_index relies on
+            # MCRecoAssociations, which is dropped in new-schema files.
+            # The angle-based matcher in functions.h reconstructs the link
+            # by matching every RP to its closest stable MC particle in
+            # (theta, phi) with a loose |p| consistency cut. On legacy
+            # files MCRecoAssociations is populated, so the matcher's
+            # output supersedes it harmlessly.
+            .Define('RP_MCidx',
+                    'FCCAnalyses::ZHfunctions::matchRPtoMCByAngle('
+                    'ReconstructedParticles, Particle, 0.02, 0.20)')
+            # Per-RP truth PDG (0 if no match). Useful for K/pi diagnostics
+            # and for sanity-checking the per-hemisphere truth label
+            # assignment in prep_bhadron.
+            .Define('RP_truthPDG',
+                    'FCCAnalyses::ZHfunctions::getRPMatchedPDG(RP_MCidx, Particle)')
+
+            # ---- New-schema PID parameters per RP ------------------------
+            # ParticleID_dEdx: 2 params per PID [value, sigma]
+            #   - RP_dndx_clean = TPC dE/dx mean (replaces the broken -9 sentinel
+            #                     that legacy get_RP_dndx returns on new schema)
+            #   - RP_dndx_sigma = uncertainty
+            # ParticleID_HadronRich: 18 params per PID, indices for the
+            # RICH gas / liquid Cherenkov tags by particle hypothesis.
+            # We expose the most useful ones; the full vector is too noisy
+            # for direct training but the gas-pi/K/p triplet is the actual
+            # PID discriminator the analyzers used historically.
+            .Alias('PIDdEdx_params',          '_ParticleID_dEdx_parameters')
+            .Alias('PIDdEdx_particle_idx',    '_ParticleID_dEdx_particle.index')
+            .Alias('PIDRich_params',          '_ParticleID_HadronRich_parameters')
+            .Alias('PIDRich_particle_idx',    '_ParticleID_HadronRich_particle.index')
+
+            # PA.MTPC parameter layout (empirically verified):
+            #   param 0 = number of TPC samples in the track (~7 typical)
+            #   param 1 = mean dE/dx value -- THE actual ionization measurement
+            # The converter README's "[value, sigma]" doc is incorrect.
+            .Define('RP_dndx_nSamp',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_dEdx,'
+                    ' PIDdEdx_params, PIDdEdx_particle_idx, 0)')
+            .Define('RP_dndx_clean',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_dEdx,'
+                    ' PIDdEdx_params, PIDdEdx_particle_idx, 1)')
+
+            # ParticleID_HadronRich parameter layout (per ild/...
+            # delphi_sdst_to_edm4hep.cpp):
+            #   idx 0..2 : KHAID(4..6)  — gas RICH per-hypothesis tag codes
+            #   idx 3..4 : KHAID(2,3)   — combined hadronic ID tags
+            #   idx 5..6 : QHAID(7,8)   — liquid RICH per-hypothesis tags
+            #   idx 7    : KHAID(9)     — auxiliary HAID tag
+            #   idx 8..11: THEG, SIGG, NPHG, NEPG  — gas Cherenkov angle + n_photons
+            #   idx 12+  : liquid Cherenkov angle + n_photons (mirror of 8..11)
+            # The tag values are integer codes (not likelihoods) but the model
+            # learns them fine as numerical inputs. We expose the discriminating
+            # subset; the angle + n-photon measurements are the most
+            # information-dense (continuous, momentum-aware).
+            .Define('RP_HAID_gas0',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_HadronRich,'
+                    ' PIDRich_params, PIDRich_particle_idx, 0)')
+            .Define('RP_HAID_gas1',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_HadronRich,'
+                    ' PIDRich_params, PIDRich_particle_idx, 1)')
+            .Define('RP_HAID_gas2',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_HadronRich,'
+                    ' PIDRich_params, PIDRich_particle_idx, 2)')
+            .Define('RP_HAID_liq0',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_HadronRich,'
+                    ' PIDRich_params, PIDRich_particle_idx, 5)')
+            .Define('RP_HAID_liq1',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_HadronRich,'
+                    ' PIDRich_params, PIDRich_particle_idx, 6)')
+            .Define('RP_RICHgas_theta',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_HadronRich,'
+                    ' PIDRich_params, PIDRich_particle_idx, 8)')
+            .Define('RP_RICHgas_nphot',
+                    'FCCAnalyses::ZHfunctions::getRPPIDParam('
+                    'ReconstructedParticles, ParticleID_HadronRich,'
+                    ' PIDRich_params, PIDRich_particle_idx, 10)')
             .Define('RP_fromBs',  'FCCAnalyses::ZHfunctions::get_RP_isDescendant(531,  true)(RP_MCidx, Particle, Particle1)')
             .Define('RP_fromBu',  'FCCAnalyses::ZHfunctions::get_RP_isDescendant(521,  true)(RP_MCidx, Particle, Particle1)')
             .Define('RP_fromBd',  'FCCAnalyses::ZHfunctions::get_RP_isDescendant(511,  true)(RP_MCidx, Particle, Particle1)')
@@ -458,6 +552,18 @@ class RDFanalysis():
                     'FCCAnalyses::ZHfunctions::get_RP_vert_attr(RP_vert_ind, Vertex_e)')
             .Define('RP_vert_mass',
                     'FCCAnalyses::ZHfunctions::get_RP_vert_attr(RP_vert_ind, Vertex_mass)')
+
+            # Per-RP "is-V0-daughter" proxy: if the RP belongs to a vertex
+            # whose mass is consistent with K0_S or Λ, flag it. This is the
+            # stage1-level surrogate for SKELANA's LVLOCK V0-tag bit
+            # (which the new-schema converter doesn't yet emit). Approximate
+            # but the model can learn it as a soft strangeness/V0 feature.
+            .Define('RP_vert_isV0_int',
+                    'ROOT::VecOps::RVec<float>(Vertex_isV0.begin(), Vertex_isV0.end())')
+            .Define('RP_isV0daughter_f',
+                    'FCCAnalyses::ZHfunctions::get_RP_vert_attr(RP_vert_ind, RP_vert_isV0_int)')
+            .Define('RP_isV0daughter',
+                    'ROOT::VecOps::RVec<int>(RP_isV0daughter_f.begin(), RP_isV0daughter_f.end())')
 
             .Define('EVT_thrusthemis0_n', 'Algorithms::getAxisN(0)(RP_thrustangle, RP_charge)')
             .Define('EVT_thrusthemis1_n', 'Algorithms::getAxisN(1)(RP_thrustangle, RP_charge)')
@@ -616,15 +722,21 @@ class RDFanalysis():
             'RP_px', 'RP_py', 'RP_pz', 'RP_phi', 'RP_theta', 'RP_charge',
             'RP_thrustangle', 'RP_Dphi', 'RP_Dtheta',
             'RP_fromPV', 'RP_vert_ind', 'RP_vert_e', 'RP_vert_mass',
+            'RP_isV0daughter',
             'RP_trk_d0', 'RP_trk_z0', 'RP_trk_phi', 'RP_trk_omega', 'RP_trk_tanLambda',
             'RP_dndx', 'RP_isMu', 'RP_isEl', 'RP_hasRich', 'RP_lvlock', 'RP_passLvlock',
-            'RP_nMC', 'RP_MCidx',
+            'RP_nMC', 'RP_MCidx', 'RP_truthPDG',
+            'RP_dndx_clean', 'RP_dndx_nSamp',
+            'RP_HAID_gas0', 'RP_HAID_gas1', 'RP_HAID_gas2',
+            'RP_HAID_liq0', 'RP_HAID_liq1',
+            'RP_RICHgas_theta', 'RP_RICHgas_nphot',
             'RP_fromBs', 'RP_fromBu', 'RP_fromBd', 'RP_fromBc', 'RP_fromLb',
             'RP_fromD', 'RP_fromHF',
 
             'Vertex_n', 'Vertex_x', 'Vertex_y', 'Vertex_z',
             'Vertex_xErr', 'Vertex_yErr', 'Vertex_zErr', 'Vertex_chi2',
-            'Vertex_isPV', 'Vertex_ntrk', 'Vertex_mass',
+            'Vertex_isPV', 'Vertex_isInDet', 'Vertex_isV0',
+            'Vertex_ntrk', 'Vertex_mass',
             'Vertex_px', 'Vertex_py', 'Vertex_pz', 'Vertex_e',
             'Vertex_phi', 'Vertex_theta',
             'Vertex_Dphi', 'Vertex_Dtheta', 'Vertex_thrustangle',
