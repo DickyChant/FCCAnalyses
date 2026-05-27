@@ -586,6 +586,62 @@ class RDFanalysis():
 
             .Define('EVT_Thrust_Mag', 'EVT_thrust.at(0)')
 
+            ###############################################################
+            ## Durham k_T exclusive clustering -> EXACTLY 2 jets (dijet-like
+            ## event topology). The paper arXiv:2603.06524 applies this same
+            ## clustering and then cuts on:
+            ##    y_3 < 0.13  (well-defined 2-jet event, no hard gluon)
+            ##    jet |p| > 10 GeV
+            ##    |cos theta_jet| < 0.65
+            ## We expose all the needed quantities; the downstream prep
+            ## step (prep_partonflavour.py --mode jet) applies the cuts and
+            ## emits one row per jet.
+            ##
+            ## clustering_ee_kt(arg_exclusive=2, arg_cut=2, arg_sorted=1,
+            ##                  arg_recombination=0):
+            ##   - exclusive=2: cluster to EXACTLY arg_cut jets
+            ##   - cut=2: N=2 jets
+            ##   - sorted=1: order jets by energy (descending)
+            ##   - recombination=0: E-scheme (standard for Durham)
+            ##
+            ## get_exclusive_dmerge(jet, 2) returns d_{2,3} - the merge
+            ## distance at the 3->2 transition. Divide by E_cm^2 (91.2 GeV)
+            ## to get the paper's y_3 normalization.
+            ###############################################################
+            .Define('PseudoJets_RP',
+                    'JetClusteringUtils::set_pseudoJets(RP_px, RP_py, RP_pz, RP_e)')
+            .Define('FCCAnalysesJets_durham',
+                    'JetClustering::clustering_ee_kt(2, 2, 1, 0)(PseudoJets_RP)')
+            .Define('Jets_durham',
+                    'JetClusteringUtils::get_pseudoJets(FCCAnalysesJets_durham)')
+            .Define('JetConstituents_durham',
+                    'JetClusteringUtils::get_constituents(FCCAnalysesJets_durham)')
+
+            ## y_3 = d_{2,3} / E_cm^2 (normalized as in the ALEPH paper).
+            ## 91.2^2 = 8317.44.
+            .Define('EVT_y3_durham',
+                    'JetClusteringUtils::get_exclusive_dmerge(FCCAnalysesJets_durham, 2) / 8317.44f')
+
+            ## Per-jet kinematics (jets are E-ordered: jet[0] = leading,
+            ## jet[1] = subleading).
+            .Define('Jets_e',     'JetClusteringUtils::get_e(Jets_durham)')
+            .Define('Jets_p',     'JetClusteringUtils::get_p(Jets_durham)')
+            .Define('Jets_pt',    'JetClusteringUtils::get_pt(Jets_durham)')
+            .Define('Jets_theta', 'JetClusteringUtils::get_theta(Jets_durham)')
+            .Define('Jets_phi',   'JetClusteringUtils::get_phi(Jets_durham)')
+
+            ## Per-RP jet index: 0 = leading jet, 1 = subleading; -1 if not
+            ## assigned (should not happen with exclusive clustering). Done
+            ## inline via an RVec invert of the constituents list.
+            .Define('RP_jet_idx',
+                    'ROOT::VecOps::RVec<int> idx(static_cast<size_t>(RP_n), -1);'
+                    ' for (size_t j = 0; j < JetConstituents_durham.size(); ++j) {'
+                    '   for (auto rp : JetConstituents_durham[j]) {'
+                    '     if (rp >= 0 && static_cast<int>(rp) < RP_n) idx[rp] = static_cast<int>(j);'
+                    '   }'
+                    ' }'
+                    ' return idx;')
+
             .Define('genBs_thrustangle', 'Algorithms::getAxisCosTheta(EVT_thrust, genBs_px, genBs_py, genBs_pz)')
             .Define('genBu_thrustangle', 'Algorithms::getAxisCosTheta(EVT_thrust, genBu_px, genBu_py, genBu_pz)')
             .Define('genBd_thrustangle', 'Algorithms::getAxisCosTheta(EVT_thrust, genBd_px, genBd_py, genBd_pz)')
@@ -750,6 +806,11 @@ class RDFanalysis():
             'EVT_ThrustEmin_N', 'EVT_ThrustEmin_Ncharged', 'EVT_ThrustEmin_Nneutral',
             'EVT_ThrustEmax_E', 'EVT_ThrustEmax_Echarged', 'EVT_ThrustEmax_Eneutral',
             'EVT_ThrustEmax_N', 'EVT_ThrustEmax_Ncharged', 'EVT_ThrustEmax_Nneutral',
+
+            ## Durham k_T exclusive clustering (2 jets), for jet-level training.
+            'EVT_y3_durham',
+            'Jets_e', 'Jets_p', 'Jets_pt', 'Jets_theta', 'Jets_phi',
+            'RP_jet_idx',
 
             'genBs_thrustangle', 'genBu_thrustangle', 'genBd_thrustangle',
             'genBc_thrustangle', 'genLb_thrustangle',
