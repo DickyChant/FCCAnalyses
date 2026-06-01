@@ -1055,6 +1055,18 @@ classifyHemispheresByGenB(
   return std::vector<int>{pick(n_emin), pick(n_emax)};
 }
 
+// |PDG| of the first quark (|PDG| in 1..6) appearing in MCParticles.
+// For inclusive Pythia 8 e+e- -> Z -> qq samples this is the Z-decay
+// quark flavour (idx 5 after e-,e+,e-,e+,Z). Returns 0 if no quark is
+// found (defensive, shouldn't happen for hadronic events).
+inline int get_qqPDG(ROOT::VecOps::RVec<edm4hep::MCParticleData> in) {
+  for (size_t i = 0; i < in.size(); ++i) {
+    int p = std::abs(in[i].PDG);
+    if (p >= 1 && p <= 6) return p;
+  }
+  return 0;
+}
+
 
 } // namespace ZHfunctions
 } // namespace FCCAnalyses

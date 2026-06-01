@@ -154,6 +154,17 @@ class RDFanalysis():
             .Define('MC_D2',  'myUtils::get_MCDaughter2(Particle, Particle1)')
 
             #############################################
+            ## Hard-process Z-decay quark flavour (inclusive Z->qq samples).
+            ## The DELPHI converter writes ALL Pythia partons with
+            ## generatorStatus == 21 (not 23), so a status-23 cut returns
+            ## nothing. Instead, scan MCParticles in order and return the
+            ## |PDG| of the FIRST quark (|PDG| in 1..6). In Pythia 8's
+            ## e+e- -> Z -> qq listing this is idx 5 (after e-,e+,e-,e+,Z).
+            ## Returns 0 if no quark is found (defensive).
+            #############################################
+            .Define('EVT_qqPDG', 'FCCAnalyses::ZHfunctions::get_qqPDG(Particle)')
+
+            #############################################
             ## Gen B-hadron / b-quark counters
             #############################################
             .Define('genBottom',     'FCCAnalyses::MCParticle::sel_pdgID(5, true)(Particle)')
@@ -757,7 +768,7 @@ class RDFanalysis():
     def output():
         return [
             'EVT_NVertex', 'EVT_NtracksPV', 'EVT_hasPV',
-            'MC_n', 'n_genBottoms',
+            'MC_n', 'n_genBottoms', 'EVT_qqPDG',
             'n_genBs', 'n_genBu', 'n_genBd', 'n_genBc', 'n_genLb',
             'genBs_px', 'genBs_py', 'genBs_pz',
             'genBu_px', 'genBu_py', 'genBu_pz',
