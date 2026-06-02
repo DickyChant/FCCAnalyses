@@ -63,9 +63,19 @@ def main():
     n = ev.num_entries
 
     avail = set(ev.keys())
-    rp_name = ("PandoraPFOs"
-               if "PandoraPFOs/PandoraPFOs.charge" in avail
-               else "ReconstructedParticles")
+    # Schema autodetect (in priority order):
+    #   1. Packaged two-pass: prefer fDST_MAIN_Particles (full-DST union);
+    #      fall back to sDST_MAIN_Particles for SDST-only files.
+    #   2. FCC-native single-pass:   PandoraPFOs
+    #   3. Legacy schema:            ReconstructedParticles
+    if "fDST_MAIN_Particles/fDST_MAIN_Particles.charge" in avail:
+        rp_name = "fDST_MAIN_Particles"
+    elif "sDST_MAIN_Particles/sDST_MAIN_Particles.charge" in avail:
+        rp_name = "sDST_MAIN_Particles"
+    elif "PandoraPFOs/PandoraPFOs.charge" in avail:
+        rp_name = "PandoraPFOs"
+    else:
+        rp_name = "ReconstructedParticles"
 
     px = ev[f"{rp_name}/{rp_name}.momentum.x"].array()
     py = ev[f"{rp_name}/{rp_name}.momentum.y"].array()

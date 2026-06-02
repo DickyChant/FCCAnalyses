@@ -70,10 +70,101 @@ class RDFanalysis():
         # parton-flavour retrain (channel-based labels, no per-RP truth).
         # =====================================================================
         cols = set(df.GetColumnNames())
+        # v2 packaged-production schema (two-pass delphi_sdst_pass +
+        # delphi_fdst_pass output, used by /eos/.../94c/DelphiEDM4HEP/
+        # packaged/{data,mc}/). Collections are namespaced sDST_*/fDST_*;
+        # the same EDM4hep types are reused, so a flat alias bridge to
+        # the FCC names works everywhere except the dN/dx field-name swap
+        # (Quantity -> RecDqdx::dQdx).
+        packaged_schema = ('sDST_MAIN_Particles' in cols
+                           or 'fDST_MAIN_Particles' in cols)
         new_schema = ('_EFlowTrack_trackStates' in cols
-                      and '_Tracks_trackStates' not in cols)
+                      and '_Tracks_trackStates' not in cols
+                      and not packaged_schema)
 
-        if new_schema:
+        if packaged_schema:
+            # ----- Packaged two-pass schema (data and v2 MC) -----
+            # Use fDST_* for the augmented collections (full-DST), sDST_*
+            # for the SDST-tier-only fields (PID + V0 + LVLOCK).
+            df = (df
+                  # MC truth: sDST_LUJ_GenParticles (empty for data files).
+                  .Alias('Particle',  'sDST_LUJ_GenParticles')
+                  .Alias('Particle0', '_sDST_LUJ_GenParticles_parents.index')
+                  .Alias('Particle1', '_sDST_LUJ_GenParticles_daughters.index')
+
+                  # Particles + tracks. Prefer sDST_* (SDST tier) so the
+                  # bridge works on BOTH sDST-only files (single-pass
+                  # delphi_sdst_pass output, e.g. desktop_prod_partial MC)
+                  # and sDST+fDST files (full two-pass, packaged data).
+                  # fDST_* augments sDST_* with full-DST detail (HPC/HCAL/
+                  # TOF) that stage1 doesn't currently use.
+                  .Alias('ReconstructedParticles',     'sDST_MAIN_Particles')
+                  .Alias('_PandoraPFOs_tracks',        '_sDST_MAIN_Particles_tracks')
+                  .Alias('_PandoraPFOs_clusters',      '_sDST_MAIN_Particles_clusters')
+                  .Alias('EFlowTrack',                 'sDST_TRAC_Tracks')
+                  .Alias('_EFlowTrack_trackStates',    '_sDST_TRAC_Tracks_trackStates')
+
+                  # Vertices: PV + secondary V0 candidates.
+                  .Alias('PrimaryVertex',              'sDST_PV_PrimaryVertex')
+                  .Alias('Vertex',                     'sDST_PV_Vertices')
+                  .Alias('SecondaryVertices',          'sDST_V0_V0Candidates')
+                  .Alias('_SecondaryVertices_particles',
+                         '_sDST_V0_V0Candidates_particles')
+                  .Alias('_PrimaryVertex_particles',
+                         '_sDST_PV_PrimaryVertex_particles')
+
+                  # PID: sDST_-tier ParticleID collections.
+                  .Alias('ParticleID_Muon',       'sDST_MUID_MuonID')
+                  .Alias('ParticleID_Electron',   'sDST_ELID_ElectronID')
+                  .Alias('ParticleID_HadronRich', 'sDST_HAID_HadronID')
+                  .Alias('ParticleID_dEdx',       'sDST_HAID_dEdx')
+                  .Alias('_ParticleID_Muon_particle',
+                         '_sDST_MUID_MuonID_particle')
+                  .Alias('_ParticleID_Electron_particle',
+                         '_sDST_ELID_ElectronID_particle')
+                  .Alias('_ParticleID_HadronRich_particle',
+                         '_sDST_HAID_HadronID_particle')
+                  .Alias('_ParticleID_dEdx_particle',
+                         '_sDST_HAID_dEdx_particle')
+
+                  # PID flat-array aliases: point downstream
+                  # PIDdEdx_*/PIDRich_* to the sDST_* subleaves directly.
+                  .Alias('PIDdEdx_params',
+                         '_sDST_HAID_dEdx_parameters')
+                  .Alias('PIDdEdx_particle_idx',
+                         '_sDST_HAID_dEdx_particle.index')
+                  .Alias('PIDRich_params',
+                         '_sDST_HAID_HadronID_parameters')
+                  .Alias('PIDRich_particle_idx',
+                         '_sDST_HAID_HadronID_particle.index')
+
+                  # dN/dx in the packaged schema is RecDqdxData under
+                  # sDST_HAID_dEdx_RecDqdx. Alias to the EFlowTrack_dNdx
+                  # name the get_RP_dndx helper expects.
+                  .Alias('EFlowTrack_dNdx',
+                         'sDST_HAID_dEdx_RecDqdx')
+                  .Alias('_EFlowTrack_dNdx_track',
+                         '_sDST_HAID_dEdx_RecDqdx_track')
+
+                  # Track-quality cut: sDST_VECP_LVLOCK is the SKELANA
+                  # LVLOCK word per track. Pass into lvlockPassMask.
+                  .Alias('Track_lvlock', 'sDST_VECP_LVLOCK')
+                  .Define('RP_passLvlock_input',
+                          'FCCAnalyses::ZHfunctions::lvlockPassMask('
+                          'ReconstructedParticles, Track_lvlock)')
+
+                  # MCRecoAssociations: packaged uses sDST_TBL_RecoToGen as
+                  # a podio LinkData collection — different layout from the
+                  # FCC RecoMCParticleAssociation. Stub empty so the legacy
+                  # get_VertexObject / PID / getRP2MC_index paths receive
+                  # zero-length association vectors (truth-link features
+                  # come out as zero arrays).
+                  .Define('MCRecoAssociations0',
+                          'ROOT::VecOps::RVec<int>{}')
+                  .Define('MCRecoAssociations1',
+                          'ROOT::VecOps::RVec<int>{}')
+                  )
+        elif new_schema:
             df = (df
                   # MCParticles / PandoraPFOs are named the same in both
                   # schemas; only their downstream FCC-name aliases change.
@@ -109,6 +200,12 @@ class RDFanalysis():
                           'ROOT::VecOps::RVec<int>{}')
                   .Define('MCRecoAssociations1',
                           'ROOT::VecOps::RVec<int>{}')
+
+                  # PID flat-array aliases (file-side subleaves).
+                  .Alias('PIDdEdx_params',       '_ParticleID_dEdx_parameters')
+                  .Alias('PIDdEdx_particle_idx', '_ParticleID_dEdx_particle.index')
+                  .Alias('PIDRich_params',       '_ParticleID_HadronRich_parameters')
+                  .Alias('PIDRich_particle_idx', '_ParticleID_HadronRich_particle.index')
                   )
         else:
             df = (df
@@ -138,6 +235,12 @@ class RDFanalysis():
                   .Alias('Particle1',           '_MCParticles_daughters.index')
                   .Alias('MCRecoAssociations0', '_MCRecoAssociations_from.index')
                   .Alias('MCRecoAssociations1', '_MCRecoAssociations_to.index')
+
+                  # PID flat-array aliases (file-side subleaves).
+                  .Alias('PIDdEdx_params',       '_ParticleID_dEdx_parameters')
+                  .Alias('PIDdEdx_particle_idx', '_ParticleID_dEdx_particle.index')
+                  .Alias('PIDRich_params',       '_ParticleID_HadronRich_parameters')
+                  .Alias('PIDRich_particle_idx', '_ParticleID_HadronRich_particle.index')
                   )
 
         df2 = (
@@ -441,20 +544,13 @@ class RDFanalysis():
             .Define('RP_truthPDG',
                     'FCCAnalyses::ZHfunctions::getRPMatchedPDG(RP_MCidx, Particle)')
 
-            # ---- New-schema PID parameters per RP ------------------------
+            # ---- PID parameters per RP -----------------------------------
             # ParticleID_dEdx: 2 params per PID [value, sigma]
-            #   - RP_dndx_clean = TPC dE/dx mean (replaces the broken -9 sentinel
-            #                     that legacy get_RP_dndx returns on new schema)
-            #   - RP_dndx_sigma = uncertainty
-            # ParticleID_HadronRich: 18 params per PID, indices for the
-            # RICH gas / liquid Cherenkov tags by particle hypothesis.
-            # We expose the most useful ones; the full vector is too noisy
-            # for direct training but the gas-pi/K/p triplet is the actual
-            # PID discriminator the analyzers used historically.
-            .Alias('PIDdEdx_params',          '_ParticleID_dEdx_parameters')
-            .Alias('PIDdEdx_particle_idx',    '_ParticleID_dEdx_particle.index')
-            .Alias('PIDRich_params',          '_ParticleID_HadronRich_parameters')
-            .Alias('PIDRich_particle_idx',    '_ParticleID_HadronRich_particle.index')
+            # ParticleID_HadronRich: 18 params per PID.
+            # The PIDdEdx_*/PIDRich_* aliases are set up per-schema in
+            # the analysers() block above — they expand to the file-side
+            # subleaf names which differ between FCC and packaged schemas
+            # (RDataFrame Aliases don't propagate through `.index` access).
 
             # PA.MTPC parameter layout (empirically verified):
             #   param 0 = number of TPC samples in the track (~7 typical)
@@ -596,6 +692,32 @@ class RDFanalysis():
             .Define('EVT_ThrustEmin_Nneutral',  'float(EVT_thrusthemis1_n.at(2))')
 
             .Define('EVT_Thrust_Mag', 'EVT_thrust.at(0)')
+
+            #############################################
+            ## arXiv:2510.18762v1 Table-1 paper selection.
+            ## Per-particle (charged): 20<=theta<=160 deg, pT>0.4 GeV.
+            ## Per-particle (neutral): 20<=theta<=160 deg, E>0.5 GeV.
+            ## Per-event: n_ch_sel>=7, E_tot_sel>=0.5*E_cm,
+            ##            30<=theta_thrust<=150 deg.
+            ## We persist the counters + pass flag, then Filter on
+            ## EVT_paper_pass==1 below so stage1 output is the
+            ## paper-selected hadronic event sample.
+            #############################################
+            .Define('EVT_paper_n_ch_sel',
+                    'FCCAnalyses::ZHfunctions::paperNChSel('
+                    'RP_theta, RP_charge, RP_px, RP_py)')
+            .Define('EVT_paper_n_neu_sel',
+                    'FCCAnalyses::ZHfunctions::paperNNeuSel('
+                    'RP_theta, RP_charge, RP_e)')
+            .Define('EVT_paper_E_tot_sel',
+                    'FCCAnalyses::ZHfunctions::paperETotSel('
+                    'RP_theta, RP_charge, RP_px, RP_py, RP_e)')
+            .Define('EVT_paper_pass',
+                    'FCCAnalyses::ZHfunctions::paperPassEvent('
+                    'EVT_paper_n_ch_sel, EVT_paper_E_tot_sel, '
+                    'EVT_thrust_theta)')
+
+            .Filter('EVT_paper_pass == 1')
 
             ###############################################################
             ## Durham k_T exclusive clustering -> EXACTLY 2 jets (dijet-like
@@ -820,6 +942,8 @@ class RDFanalysis():
 
             ## Durham k_T exclusive clustering (2 jets), for jet-level training.
             'EVT_y3_durham',
+            'EVT_paper_n_ch_sel', 'EVT_paper_n_neu_sel',
+            'EVT_paper_E_tot_sel', 'EVT_paper_pass',
             'Jets_e', 'Jets_p', 'Jets_pt', 'Jets_theta', 'Jets_phi',
             'RP_jet_idx',
 

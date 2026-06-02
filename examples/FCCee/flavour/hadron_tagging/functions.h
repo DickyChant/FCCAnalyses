@@ -1068,6 +1068,89 @@ inline int get_qqPDG(ROOT::VecOps::RVec<edm4hep::MCParticleData> in) {
 }
 
 
+// -----------------------------------------------------------------------
+// arXiv:2510.18762v1 Table-1 selection (charged+neutral thrust).
+//
+//   Per-particle (charged):  20 <= theta <= 160 deg, pT > 0.4 GeV
+//   Per-particle (neutral):  20 <= theta <= 160 deg, E  > 0.5 GeV
+//   Per-event:               n_ch_sel >= 7,
+//                            E_tot_sel >= 0.5 * E_cm = 45.6 GeV,
+//                            30 <= theta_thrust <= 150 deg
+//
+// The helpers below compute the per-particle-cut quantities (n_ch_sel,
+// n_neu_sel, E_tot_sel) so the analyzer can both *persist* them as
+// per-event scalars in stage1 output and Filter on the combined pass
+// flag (paperPassEvent).
+// -----------------------------------------------------------------------
+inline int paperNChSel(ROOT::VecOps::RVec<float> rp_theta,
+                       ROOT::VecOps::RVec<float> rp_charge,
+                       ROOT::VecOps::RVec<float> rp_px,
+                       ROOT::VecOps::RVec<float> rp_py) {
+  const float theta_lo = 20.0f  * static_cast<float>(M_PI) / 180.0f;
+  const float theta_hi = 160.0f * static_cast<float>(M_PI) / 180.0f;
+  const float pt_min   = 0.4f;
+  int n = 0;
+  for (size_t i = 0; i < rp_theta.size(); ++i) {
+    if (rp_theta[i] < theta_lo || rp_theta[i] > theta_hi) continue;
+    if (std::abs(rp_charge[i]) <= 0.1f) continue;
+    const float pt = std::sqrt(rp_px[i] * rp_px[i] + rp_py[i] * rp_py[i]);
+    if (pt > pt_min) ++n;
+  }
+  return n;
+}
+
+inline int paperNNeuSel(ROOT::VecOps::RVec<float> rp_theta,
+                        ROOT::VecOps::RVec<float> rp_charge,
+                        ROOT::VecOps::RVec<float> rp_e) {
+  const float theta_lo = 20.0f  * static_cast<float>(M_PI) / 180.0f;
+  const float theta_hi = 160.0f * static_cast<float>(M_PI) / 180.0f;
+  const float e_min    = 0.5f;
+  int n = 0;
+  for (size_t i = 0; i < rp_theta.size(); ++i) {
+    if (rp_theta[i] < theta_lo || rp_theta[i] > theta_hi) continue;
+    if (std::abs(rp_charge[i]) > 0.1f) continue;
+    if (rp_e[i] > e_min) ++n;
+  }
+  return n;
+}
+
+inline float paperETotSel(ROOT::VecOps::RVec<float> rp_theta,
+                          ROOT::VecOps::RVec<float> rp_charge,
+                          ROOT::VecOps::RVec<float> rp_px,
+                          ROOT::VecOps::RVec<float> rp_py,
+                          ROOT::VecOps::RVec<float> rp_e) {
+  const float theta_lo = 20.0f  * static_cast<float>(M_PI) / 180.0f;
+  const float theta_hi = 160.0f * static_cast<float>(M_PI) / 180.0f;
+  const float pt_min   = 0.4f;
+  const float e_min    = 0.5f;
+  float E = 0.0f;
+  for (size_t i = 0; i < rp_theta.size(); ++i) {
+    if (rp_theta[i] < theta_lo || rp_theta[i] > theta_hi) continue;
+    if (std::abs(rp_charge[i]) > 0.1f) {
+      const float pt = std::sqrt(rp_px[i] * rp_px[i] + rp_py[i] * rp_py[i]);
+      if (pt > pt_min) E += rp_e[i];
+    } else {
+      if (rp_e[i] > e_min) E += rp_e[i];
+    }
+  }
+  return E;
+}
+
+// Final event pass flag, given the precomputed counters + scalar
+// EVT_thrust_theta (radians).
+inline int paperPassEvent(int n_ch_sel, float e_tot_sel, float theta_thrust) {
+  constexpr float E_CM           = 91.2f;
+  constexpr int   N_CH_MIN       = 7;
+  constexpr float E_TOT_FRAC     = 0.5f;
+  constexpr float THETA_TH_LO    = 30.0f  * static_cast<float>(M_PI) / 180.0f;
+  constexpr float THETA_TH_HI    = 150.0f * static_cast<float>(M_PI) / 180.0f;
+  if (n_ch_sel < N_CH_MIN) return 0;
+  if (e_tot_sel < E_TOT_FRAC * E_CM) return 0;
+  if (theta_thrust < THETA_TH_LO || theta_thrust > THETA_TH_HI) return 0;
+  return 1;
+}
+
+
 } // namespace ZHfunctions
 } // namespace FCCAnalyses
 
