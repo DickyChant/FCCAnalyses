@@ -31,6 +31,9 @@ Verified on smoke sample
   /eos/experiment/eealliance/Users/zhangj/edm4hep/edm4hep/events_bb_*.edm4hep.root
 (~95% pass the EVT_hasPV==1 filter, ≈19/20 on a 20-event smoke).
 '''
+import os
+import sys
+
 
 # Mandatory: list of processes
 processList = {
@@ -51,6 +54,20 @@ includePaths = ['functions.h']
 
 # Optional: number of threads
 nCPUS = 4
+
+# Optional: charged-track momentum scale from delphi-correctionlib
+# (momentumScale_9495.json.gz; see examples/FCCee/delphi/corrections/README.md).
+# Applied to sDST_MAIN_Particles on the packaged two-pass schema only, before
+# anything else reads them; data only, simulation passes through. Set
+# DELPHI_MOMENTUM_SCALE to the file to enable it, and
+# DELPHI_MOMENTUM_SCALE_VARIATION to nominal, scale_up, scale_down,
+# alignment_up or alignment_down.
+momentumScaleFile = os.environ.get('DELPHI_MOMENTUM_SCALE')
+momentumScaleVariation = os.environ.get('DELPHI_MOMENTUM_SCALE_VARIATION', 'nominal')
+if momentumScaleFile:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    '..', '..', 'delphi', 'corrections'))
+    import delphi_corrections
 
 
 class RDFanalysis():
@@ -84,6 +101,16 @@ class RDFanalysis():
 
         if packaged_schema:
             # ----- Packaged two-pass schema (data and v2 MC) -----
+            # ReconstructedParticles: sDST_MAIN_Particles, momentum-scale
+            # corrected when enabled (same order and relations, so the index
+            # aliases below still apply).
+            if momentumScaleFile:
+                df = delphi_corrections.apply_momentum_scale(
+                    df, momentumScaleFile, variation=momentumScaleVariation,
+                    particles='sDST_MAIN_Particles',
+                    output='ReconstructedParticles')
+            else:
+                df = df.Alias('ReconstructedParticles', 'sDST_MAIN_Particles')
             # Use fDST_* for the augmented collections (full-DST), sDST_*
             # for the SDST-tier-only fields (PID + V0 + LVLOCK).
             df = (df
@@ -98,7 +125,6 @@ class RDFanalysis():
                   # and sDST+fDST files (full two-pass, packaged data).
                   # fDST_* augments sDST_* with full-DST detail (HPC/HCAL/
                   # TOF) that stage1 doesn't currently use.
-                  .Alias('ReconstructedParticles',     'sDST_MAIN_Particles')
                   .Alias('_PandoraPFOs_tracks',        '_sDST_MAIN_Particles_tracks')
                   .Alias('_PandoraPFOs_clusters',      '_sDST_MAIN_Particles_clusters')
                   .Alias('EFlowTrack',                 'sDST_TRAC_Tracks')

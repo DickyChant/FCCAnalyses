@@ -22,6 +22,11 @@ Differences vs `thrust_edm4hep.py`:
     EFlowTrack chi2/ndf, with PFO->Track indirection through
     PandoraPFOs.tracks_begin/end).
 
+Optional: --momentum-scale FILE applies the charged-track momentum scale of
+delphi-correctionlib (momentumScale_9495.json.gz) to the data events of a
+packaged-schema file, before any selection (see
+examples/FCCee/delphi/corrections/README.md). Needs correctionlib.
+
 Output CSV columns:
   runNo, evtNo, n_ch_sel, n_neu_sel, E_tot, theta_thrust_deg,
   thrust_reco, pass_hadronic
@@ -32,6 +37,7 @@ import uproot
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 from common_functions import thrust_axis_fast_optimized
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent / "corrections"))
 
 E_CM       = 91.2   # GeV, LEP-1 Z-pole
 THETA_MIN_PART_DEG = 20.0
@@ -47,16 +53,30 @@ DEG = math.pi / 180.0
 
 
 def get_run_evt(gp_keys_event, gp_vals_event):
+    # Older converters write runNumber/eventNumber; delphi-edm4hep writes
+    # <pass>_EVT_runNumber/<pass>_EVT_eventNumber.
     out = {}
     for k, v in zip(list(gp_keys_event), list(gp_vals_event)):
-        out[k] = int(v[0])
-    return out.get("runNumber", -1), out.get("eventNumber", -1)
+        if len(v):
+            out[k] = int(v[0])
+    def get(name):
+        if name in out:
+            return out[name]
+        return next((v for k, v in out.items() if k.endswith(f"_EVT_{name}")), -1)
+    return get("runNumber"), get("eventNumber")
 
 
 def main():
     ap = argparse.ArgumentParser(__doc__)
     ap.add_argument("input")
     ap.add_argument("output_csv")
+    ap.add_argument("--momentum-scale", metavar="FILE",
+                    help="delphi-correctionlib momentumScale_9495.json.gz: correct charged-track "
+                         "momenta of data events")
+    ap.add_argument("--momentum-scale-variation", default="nominal",
+                    help="nominal, scale_up, scale_down, alignment_up or alignment_down")
+    ap.add_argument("--momentum-scale-all-tracks", action="store_true",
+                    help="correct every charged track, not only those in the calibration's selection")
     args = ap.parse_args()
 
     ev = uproot.open(args.input)["events"]
@@ -86,6 +106,30 @@ def main():
     gp_keys = ev["GPIntKeys"].array()
     gp_vals = ev["GPIntValues"].array()
 
+    scale = None
+    if args.momentum_scale:
+        if not rp_name.endswith("_MAIN_Particles"):
+            sys.exit(f"--momentum-scale needs a delphi-edm4hep file; {rp_name} has no V0s or processing tag")
+        import correctionlib
+        import delphi_corrections as dc
+        prefix = rp_name.split("_", 1)[0]
+        V = f"{prefix}_V0_V0Candidates"
+        tags = [dict(zip(k, v)).get(f"{prefix}_EVT_dstProcessingTag", [""])[0]
+                for k, v in zip(ev["GPStringKeys"].array(), ev["GPStringValues"].array())]
+        scale = {
+            "dc": dc,
+            "corr": correctionlib.CorrectionSet.from_file(args.momentum_scale)["track_momentum_scale"],
+            "window": None if args.momentum_scale_all_tracks else dc.CALIBRATED_WINDOW,
+            "mass": ev[f"{rp_name}/{rp_name}.mass"].array(),
+            "v0": [ev[f"{V}/{V}.{f}"].array() for f in ("position.x", "position.y", "particles_begin",
+                                                      "particles_end")]
+                  + [ev[f"_{V}_particles/_{V}_particles.index"].array()]
+                  + [ev[f"{V}/{V}.{f}"].array() for f in ("parameters_begin", "parameters_end")]
+                  + [ev[f"_{V}_parameters"].array()],
+            "tags": tags,
+        }
+        n_scaled_events = 0
+
     with open(args.output_csv, "w") as out:
         out.write(
             "runNo,evtNo,n_ch_sel,n_neu_sel,E_tot,theta_thrust_deg,"
@@ -102,6 +146,17 @@ def main():
             pzi = np.asarray(pz[i], dtype=np.float64)
             eni = np.asarray(en[i], dtype=np.float64)
             qi  = np.asarray(q[i], dtype=np.float64)
+
+            if scale is not None and run > 0:
+                v0 = [np.asarray(a[i]) for a in scale["v0"]]
+                r0 = scale["dc"].v0_daughter_radius(len(pxi), *v0)
+                s = scale["dc"].momentum_scale_factors(
+                    scale["corr"], scale["tags"][i], args.momentum_scale_variation,
+                    pxi, pyi, pzi, qi, r0, window=scale["window"])
+                pxi, pyi, pzi = pxi * s, pyi * s, pzi * s
+                mi = np.asarray(scale["mass"][i], dtype=np.float64)
+                eni = np.where(s != 1, np.sqrt(pxi**2 + pyi**2 + pzi**2 + mi**2), eni)
+                n_scaled_events += 1
 
             p_mag = np.sqrt(pxi**2 + pyi**2 + pzi**2)
             with np.errstate(invalid="ignore", divide="ignore"):
@@ -148,6 +203,9 @@ def main():
                 f"{theta_thrust_deg:.4f},{tau:.10g},{int(pass_had)}\n"
             )
 
+    if scale is not None:
+        print(f"momentum scale ({args.momentum_scale_variation}) applied to {n_scaled_events} data events",
+              flush=True)
     print(f"wrote {args.output_csv}", flush=True)
 
 

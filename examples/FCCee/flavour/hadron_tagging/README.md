@@ -86,6 +86,14 @@ Always use `RP_passLvlock == 1` rather than `RP_lvlock <= 0`: the
 REMCLU class (bit 32) decodes as INT32_MIN which is numerically
 negative, so `<=0` keeps it by mistake.
 
+## Momentum scale (DELPHI-native variant only)
+
+`analysis_stage1_delphi_native.py` can apply delphi-correctionlib's
+charged-track momentum scale to `sDST_MAIN_Particles` on packaged-schema
+files: set `DELPHI_MOMENTUM_SCALE=/path/to/momentumScale_9495.json.gz` (and
+`DELPHI_MOMENTUM_SCALE_VARIATION` for a systematic variation). Data only. See
+[`../../delphi/corrections/README.md`](../../delphi/corrections/README.md).
+
 ## Modern-stack quirks
 
 Several FCCAnalyses helpers depend on EDM4hep 0.x field names that were
